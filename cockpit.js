@@ -469,6 +469,31 @@ function renderKosten(){
     await safeWrite(() => state.db.doc("kosten/" + b.dataset.delcost).delete()); }));
 }
 
+/* ============ CLAUDE ============ */
+const CLAUDE_URL = "https://claude.ai/code/session_01E1q44ajYg6R6626ggh89k4";
+function renderClaude(){
+  const v = $("#v-claude"); const W = state.wishes || []; const open = W.filter(w => !w.done);
+  v.innerHTML = `<div class="sechead"><h2>Mit Claude weiterbauen</h2></div>
+  <div class="card hl"><h3>Unser Chat</h3>
+    <p style="margin:0 0 10px">Öffnet die Unterhaltung, in der diese App entstanden ist. Claude kann dort direkt im GitHub-Projekt Änderungen machen und sie hochladen.</p>
+    <a class="btn" href="${CLAUDE_URL}" target="_blank" rel="noopener" style="text-decoration:none">Chat mit Claude öffnen</a></div>
+  <div class="card"><div class="sechead"><h3>Wunschliste</h3><span class="small muted">${open.length} offen</span></div>
+    <p class="small muted" style="margin:0 0 8px">Ideen und Fehler sammeln, auch offline. Später gesammelt an Claude schicken.</p>
+    ${state.canWrite ? `<form class="addrow" id="wishForm"><input id="wishText" maxlength="500" required placeholder="z. B. Packliste nach Personen trennen"><button class="btn" type="submit">Notieren</button></form>` : ""}
+    <div style="margin-top:8px">${W.map(w => `<div class="wish ${w.done ? "done" : ""}"><input type="checkbox" class="chk" data-wish="${esc(w.id)}" ${w.done ? "checked" : ""} aria-label="erledigt"><div><div class="wt">${esc(w.text)}</div><div class="small muted">${esc(nameOf(w.by))} · ${new Date(w.at).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}</div></div><button class="copy" type="button" data-delwish="${esc(w.id)}">löschen</button></div>`).join("") || '<p class="muted small">Noch keine Wünsche.</p>'}</div>
+    ${open.length ? `<div style="margin-top:12px;display:grid;gap:6px"><button class="btn wa" type="button" id="wishSend" style="background:var(--accent);border-color:var(--accent)">Offene Wünsche kopieren & Claude öffnen</button><span class="small muted" id="wishMsg">Der Text liegt danach in der Zwischenablage, im Chat einfach einfügen.</span></div>` : ""}
+  </div>
+  <div class="card"><h3>Gut zu wissen</h3><ul class="dots"><li>Claude braucht Internet. Im Funkloch Wünsche hier notieren, später schicken.</li><li>Änderungen landen nach 1–2 Minuten in der App. Danach die App einmal neu öffnen.</li></ul></div>`;
+  const f = $("#wishForm"); if(f) f.addEventListener("submit", async e => { e.preventDefault(); const t = $("#wishText").value.trim(); if(!t) return; await safeWrite(() => state.db.collection("wishes").add({text: t, done: false, at: Date.now()})); });
+  v.querySelectorAll("[data-wish]").forEach(cb => cb.addEventListener("change", async () => { const w = W.find(x => x.id === cb.dataset.wish); if(!w) return; const { id, ...rest } = w; await safeWrite(() => state.db.doc("wishes/" + id).set({...rest, done: cb.checked})); }));
+  v.querySelectorAll("[data-delwish]").forEach(b => b.addEventListener("click", async () => { if(b.dataset.armed !== "1"){ b.dataset.armed = "1"; b.textContent = "wirklich?"; return; } await safeWrite(() => state.db.doc("wishes/" + b.dataset.delwish).delete()); }));
+  const s = $("#wishSend"); if(s) s.addEventListener("click", async () => {
+    const txt = "Wünsche für unsere Patagonien-App (github.com/vbrt/patagonien):\n" + open.map((w,i) => `${i+1}. ${w.text} (${nameOf(w.by)})`).join("\n");
+    try{ await navigator.clipboard.writeText(txt); $("#wishMsg").textContent = "Kopiert. Im Chat einfügen."; }catch(e){ $("#wishMsg").textContent = "Kopieren ging nicht, bitte Wünsche abtippen."; }
+    window.open(CLAUDE_URL, "_blank", "noopener");
+  });
+}
+
 /* ============ BINDINGS ============ */
 async function safeWrite(fn){
   if(!state.db){ showBanner("Speichern geht gerade nicht: Die gemeinsame Ablage ist nicht verbunden. Bitte angemeldet öffnen."); return false; }
@@ -536,7 +561,7 @@ function bindCopy(root){
 function showBanner(t){ const b = $("#banner"); b.textContent = t; b.hidden = false; }
 
 /* ============ ROUTING ============ */
-const VIEWS = ["heute","plan","buchungen","trek","orte","posten","kosten","orga"];
+const VIEWS = ["heute","plan","buchungen","trek","orte","posten","kosten","orga","claude"];
 let current = "heute";
 function route(){
   const h = location.hash.replace("#","");
@@ -550,7 +575,7 @@ function renderCurrent(){
   const active = document.activeElement;
   // Nicht neu zeichnen, während jemand in ein Notizfeld schreibt
   if(active && active.matches && active.matches("textarea[data-note], .addrow input, .addrow select, .costform input, .costform select")) return;
-  ({heute:renderHeute,plan:renderPlan,buchungen:renderBuchungen,trek:renderTrek,orte:renderOrte,posten:()=>{},kosten:renderKosten,orga:renderOrga})[current]();
+  ({heute:renderHeute,plan:renderPlan,buchungen:renderBuchungen,trek:renderTrek,orte:renderOrte,posten:()=>{},kosten:renderKosten,orga:renderOrga,claude:renderClaude})[current]();
 }
 function renderAll(){ renderCount(); renderCurrent(); }
 window.addEventListener("hashchange", () => { route(); window.scrollTo(0,0); });
@@ -575,6 +600,7 @@ function rowsToState(){
   state.costs = list("kosten").sort((a,b) => (b.date||"").localeCompare(a.date||"") || (b.at||0)-(a.at||0));
   state.beers = list("bier").sort((a,b) => (b.at||0)-(a.at||0));
   state.rates = c("settings").rates || {};
+  state.wishes = list("wishes").sort((a,b) => (a.done - b.done) || (b.at||0)-(a.at||0));
 }
 function localApply(op){
   ROWS[op.coll] = ROWS[op.coll] || {};
