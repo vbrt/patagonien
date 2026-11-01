@@ -94,16 +94,21 @@ function render(){
       <div class="crew">${["felix","victor"].map(k => `<div class="card mate"><img src="${PEOPLE[k].img}" alt="${PEOPLE[k].name}"><div><span class="nick">${esc(PEOPLE[k].nick)}</span><b>${PEOPLE[k].name}</b><span class="small muted">${esc(PEOPLE[k].bio)}</span></div></div>`).join("")}</div></section>
   </main>
   <footer class="col">Mit Liebe aus Patagonien · Victor &amp; Felix
-    <div class="team">${S.editor ? `<div class="small" style="text-align:center">Angemeldet als ${esc(S.session?.user?.email || "Redaktion")}</div><a class="teambtn" href="cockpit.html" style="text-decoration:none">Zum Cockpit</a><button class="teambtn" type="button" id="logout">Abmelden</button>`
+    <div class="team">${S.editor ? `<div class="small" style="text-align:center">Angemeldet als ${esc(S.session?.user?.email || "Redaktion")}</div><a class="teambtn" href="cockpit.html" style="text-decoration:none">Zum Cockpit</a>${pwFormHtml()}<button class="teambtn" type="button" id="logout">Abmelden</button>`
       : `<button class="teambtn" type="button" id="loginToggle" aria-expanded="false" aria-controls="loginForm">Anmelden für Victor &amp; Felix</button>
-         <form class="login" id="loginForm" hidden><label class="small" for="loginEmail">Deine E-Mail-Adresse</label><input type="email" id="loginEmail" required placeholder="name@beispiel.de" autocomplete="email" inputmode="email"><button class="btn" type="submit">Anmelde-Link schicken</button><div class="msg" id="loginMsg" aria-live="polite"></div></form>`}</div>
+         <form class="login" id="loginForm" hidden><label class="small" for="loginEmail">Deine E-Mail-Adresse</label><input type="email" id="loginEmail" required placeholder="name@beispiel.de" autocomplete="email" inputmode="email"><label class="small" for="loginPw">Passwort (falls schon festgelegt)</label><input type="password" id="loginPw" autocomplete="current-password" placeholder="leer lassen für Anmelde-Link"><button class="btn" type="submit">Anmelden</button><div class="msg" id="loginMsg" aria-live="polite"></div></form>`}</div>
   </footer>`;
   bind();
+}
+function pwFormHtml(){
+  return `<details class="card" style="margin-top:12px"><summary><b>Passwort festlegen</b> <span class="small muted">· dann braucht ihr keine Anmelde-Mails mehr</span></summary>
+    <form class="login" id="pwForm" style="margin-top:10px"><input type="password" id="pwNew" minlength="10" required autocomplete="new-password" placeholder="Neues Passwort, mind. 10 Zeichen"><button class="btn" type="submit">Speichern</button><div class="msg" id="pwMsg" aria-live="polite"></div></form></details>`;
 }
 function renderStudioOnly(){
   const root = $(ROOT_ID); if(!root) return;
   root.innerHTML = S.editor ? studioHtml() + `<h2 id="h-feed" style="margin-top:8px">Eure letzten Posts</h2>` + (S.posts.length ? S.posts.slice(0,15).map(postHtml).join("") : '<p class="muted">Noch keine Posts.</p>')
     : '<div class="card"><p>Bitte zuerst anmelden.</p></div>';
+  if(S.editor) root.insertAdjacentHTML("beforeend", pwFormHtml());
   bind();
 }
 function postHtml(p){
@@ -310,8 +315,13 @@ function bind(){
   const lf = $("loginForm");
   if(lf) lf.addEventListener("submit", async e => { e.preventDefault(); const m = $("loginMsg");
     if(DEMO){ m.textContent = "In der Vorschau gibt es keine Anmeldung."; return; }
-    const { error } = await sb.auth.signInWithOtp({ email: $("loginEmail").value.trim(), options: { shouldCreateUser:false, emailRedirectTo: location.origin + location.pathname } });
+    const email = $("loginEmail").value.trim(), pw = $("loginPw").value;
+    if(pw){ const { error } = await sb.auth.signInWithPassword({ email, password: pw }); m.textContent = error ? "E-Mail oder Passwort falsch." : "Angemeldet."; if(!error){ await checkEditor(); render(); } return; }
+    const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser:false, emailRedirectTo: location.origin + location.pathname } });
     if(error) console.warn(error); m.textContent = error ? loginErrorText(error) : "Link ist unterwegs. Bitte E-Mail öffnen und auf dem Handy antippen."; });
+  const pf = $("pwForm"); if(pf) pf.addEventListener("submit", async e => { e.preventDefault(); const m = $("pwMsg");
+    if(DEMO){ m.textContent = "In der Vorschau nicht verfügbar."; return; }
+    const { error } = await sb.auth.updateUser({ password: $("pwNew").value }); m.textContent = error ? "Hat nicht geklappt: " + error.message : "Gespeichert. Ab jetzt mit E-Mail und Passwort anmelden."; if(!error) $("pwNew").value = ""; });
   const lo = $("logout"); if(lo) lo.addEventListener("click", async () => { if(sb) await sb.auth.signOut(); S.editor = false; S.lastShare = null; render(); });
   if(!S.editor) return;
 

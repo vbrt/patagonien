@@ -648,13 +648,19 @@ async function loadWeatherOM(){
     ls.set("cockpit-wx", state.wx); queueRender();
   }catch(e){ state.wx = ls.get("cockpit-wx"); }
 }
-function showGate(msg){
+function showGate(msg, email){
   document.querySelector("nav.tabs").hidden = true;
-  document.querySelector("main").innerHTML = `<div class="gate card"><h2>Cockpit</h2><p class="muted" style="margin:0">Nur für Victor &amp; Felix. ${esc(msg || "")}</p>
-    <form class="login" id="cLogin"><label class="small" for="cEmail">Deine E-Mail-Adresse</label><input type="email" id="cEmail" required autocomplete="email" inputmode="email" placeholder="name@beispiel.de"><button class="btn" type="submit">Anmelde-Link schicken</button><div class="msg" id="cMsg" aria-live="polite"></div></form>
+  document.querySelector("main").innerHTML = `<div class="gate card"><h2>Cockpit</h2><p class="muted" style="margin:0">Nur für Victor &amp; Felix.</p>
+    ${msg ? `<p class="banner" style="margin:0">${esc(msg)}</p>` : ""}
+    ${email ? `<button class="btn ghost" type="button" id="cOut">Abmelden (${esc(email)})</button>` : `<form class="login" id="cLogin"><label class="small" for="cEmail">Deine E-Mail-Adresse</label><input type="email" id="cEmail" required autocomplete="email" inputmode="email" placeholder="name@beispiel.de">
+      <label class="small" for="cPw">Passwort (falls schon festgelegt)</label><input type="password" id="cPw" autocomplete="current-password" placeholder="leer lassen für Anmelde-Link">
+      <button class="btn" type="submit">Anmelden</button><div class="msg" id="cMsg" aria-live="polite"></div></form>`}
     <a href="index.html" class="small">Zum öffentlichen Blog</a></div>`;
-  $("#cLogin").addEventListener("submit", async e => { e.preventDefault();
-    const { error } = await SBC.auth.signInWithOtp({ email: $("#cEmail").value.trim(), options: { shouldCreateUser: false, emailRedirectTo: location.origin + location.pathname } });
+  const out = $("#cOut"); if(out) out.addEventListener("click", async () => { await SBC.auth.signOut(); location.reload(); });
+  const f = $("#cLogin"); if(f) f.addEventListener("submit", async e => { e.preventDefault();
+    const email = $("#cEmail").value.trim(), pw = $("#cPw").value;
+    if(pw){ const { error } = await SBC.auth.signInWithPassword({ email, password: pw }); if(error){ $("#cMsg").textContent = "E-Mail oder Passwort falsch."; } else location.reload(); return; }
+    const { error } = await SBC.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: location.origin + location.pathname } });
     if(error) console.warn(error); $("#cMsg").textContent = error ? (window.loginErrorText ? window.loginErrorText(error) : error.message) : "Link ist unterwegs. Mail auf diesem Gerät öffnen und antippen."; });
 }
 
@@ -665,7 +671,7 @@ function queueRender(){ if(renderQueued) return; renderQueued = true; requestAni
   if(!SBC){ showGate("Die Datenbank ist nicht eingerichtet."); return; }
   const cache = ls.get(CACHE_KEY);
   const { data: { session } } = await SBC.auth.getSession();
-  if(!session){ ls.del(CACHE_KEY); ls.del(OPS_KEY); showGate(); return; }
+  if(!session){ ls.del(CACHE_KEY); ls.del(OPS_KEY); showGate("Du bist in diesem Browser noch nicht angemeldet."); return; }
   state.me = (session.user.email || "").toLowerCase();
   state.db = dbAdapter; state.assets = assetsAdapter; state.canWrite = true;
   if(cache){ ROWS = cache; OPS.forEach(localApply); rowsToState(); }
@@ -673,7 +679,7 @@ function queueRender(){ if(renderQueued) return; renderQueued = true; requestAni
   renderCount(); route(); updateSync();
   if(navigator.onLine !== false){
     const { data: ok } = await SBC.rpc("is_editor");
-    if(!ok){ showGate("Dieses Konto ist nicht freigeschaltet."); return; }
+    if(!ok){ showGate("Angemeldet, aber diese Adresse steht nicht in der Redaktionsliste oder ist noch nicht bestätigt.", state.me); return; }
   }
   await flushOps(); await pull(); loadWeatherOM();
   window.addEventListener("online", async () => { updateSync(); await flushOps(); await pull(); });

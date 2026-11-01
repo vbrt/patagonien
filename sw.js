@@ -1,6 +1,6 @@
 // Service Worker: hält die Seite selbst offline verfügbar (Posts/Fotos kommen immer frisch aus der Datenbank)
-const V = "patagonien-v7";
-const ASSETS = ["./", "index.html", "cockpit.html", "style.css?v=7", "app.js?v=7", "data.js?v=7", "config.js?v=7", "cockpit.js?v=7", "cockpit-flags.js", "vendor/supabase.js?v=2.45.4", "vendor/591.supabase.js", "img/hero.jpg", "img/cockpit-hero.jpg", "img/felix.jpg", "img/victor.jpg"];
+const V = "patagonien-v8";
+const ASSETS = ["./", "index.html", "cockpit.html", "style.css?v=8", "app.js?v=8", "data.js?v=8", "config.js?v=8", "cockpit.js?v=8", "cockpit-flags.js", "vendor/supabase.js?v=2.45.4", "vendor/591.supabase.js", "img/hero.jpg", "img/cockpit-hero.jpg", "img/felix.jpg", "img/victor.jpg"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(V).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener("fetch", e => {
