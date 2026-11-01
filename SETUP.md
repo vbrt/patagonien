@@ -36,3 +36,9 @@ Am Ende habt ihr eine eigene Seite unter `https://DEINNAME.github.io/patagonien/
 4. Ältere Posts lassen sich über ihren eigenen „Per WhatsApp teilen“-Knopf nochmal schicken.
 
 Tipp für den Trek: Fotos werden beim Hochladen automatisch verkleinert. Videos bleiben in Originalgröße, also lieber kurze Clips und nur mit WLAN hochladen.
+
+## Cockpit (privater Bereich)
+Das Cockpit liegt unter `https://vbrt.github.io/patagonien/cockpit.html` und ist nur nach Anmeldung für Victor & Felix sichtbar.
+1. In Supabase im SQL Editor die Datei `cockpit-einrichten.sql` ausführen (bekommt ihr privat, sie liegt bewusst NICHT im Repository, weil sie eure Buchungsdaten enthält). Für ein leeres Cockpit reicht `cockpit-schema.sql`.
+2. **Authentication → URL Configuration → Redirect URLs**: `https://vbrt.github.io/patagonien/**` eintragen, damit der Anmelde-Link auch für das Cockpit funktioniert.
+3. Offline: Das Cockpit merkt sich den zuletzt geladenen Stand auf dem Handy. Häkchen, Kosten und Notizen ohne Netz werden gespeichert und automatisch nachgeschickt.

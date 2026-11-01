@@ -2,7 +2,10 @@
 "use strict";
 const CFG = window.APP_CONFIG || {};
 const DEMO = !CFG.supabaseUrl || !CFG.supabaseAnonKey;
-const sb = !DEMO && window.supabase ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey) : null;
+const sb = window.SB || (!DEMO && window.supabase ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey) : null);
+window.SB = sb;
+const MODE = window.APP_MODE || "blog";
+const ROOT_ID = window.APP_ROOT || "app";
 const SITE = CFG.siteUrl || location.href.split("#")[0].split("?")[0];
 const BUCKET = "media";
 
@@ -48,13 +51,14 @@ const WMO = {0:["☀️","Klar"],1:["🌤️","Überwiegend klar"],2:["⛅","Tei
 
 /* ---------- Render ---------- */
 function render(){
+  if(MODE === "studio") return renderStudioOnly();
   const si = stopIndex();
   const lastStatus = S.posts.find(p => p.status);
   const daysTo = Math.ceil((new Date(2026,10,13) - new Date(new Date().toDateString()))/864e5);
   let statusHtml = "";
   if(lastStatus) statusHtml = `<div class="card status"><span class="dot" aria-hidden="true"></span><div><span class="small muted">Letztes Lebenszeichen · ${esc(fmtDate(lastStatus.created_at))} · ${esc(lastStatus.place)}</span><b>${esc(lastStatus.status)}</b></div></div>`;
   else if(daysTo > 0) statusHtml = `<div class="card status"><span class="dot" aria-hidden="true"></span><div><span class="small muted">Noch ${daysTo} ${daysTo === 1 ? "Tag" : "Tage"} bis zum Abflug</span><b>Die Rucksäcke werden gepackt</b></div></div>`;
-  $("app").innerHTML = `
+  $(ROOT_ID).innerHTML = `
   ${DEMO ? '<div class="demo">Vorschau ohne Datenbank: Beiträge sind Beispiele. Nach der Einrichtung verschwindet dieser Hinweis.</div>' : ""}
   <header class="hero"><div class="col">
     <div class="eyebrow">13.–30. November 2026</div>
@@ -82,10 +86,16 @@ function render(){
       <div class="crew">${["felix","victor"].map(k => `<div class="card mate"><img src="${PEOPLE[k].img}" alt="${PEOPLE[k].name}"><div><span class="nick">${esc(PEOPLE[k].nick)}</span><b>${PEOPLE[k].name}</b><span class="small muted">${esc(PEOPLE[k].bio)}</span></div></div>`).join("")}</div></section>
   </main>
   <footer class="col">Mit Liebe aus Patagonien · Victor &amp; Felix
-    <div class="team">${S.editor ? `<div class="small" style="text-align:center">Angemeldet als ${esc(S.session?.user?.email || "Redaktion")}</div><button class="teambtn" type="button" id="logout">Abmelden</button>`
+    <div class="team">${S.editor ? `<div class="small" style="text-align:center">Angemeldet als ${esc(S.session?.user?.email || "Redaktion")}</div><a class="teambtn" href="cockpit.html" style="text-decoration:none">Zum Cockpit</a><button class="teambtn" type="button" id="logout">Abmelden</button>`
       : `<button class="teambtn" type="button" id="loginToggle" aria-expanded="false" aria-controls="loginForm">Anmelden für Victor &amp; Felix</button>
          <form class="login" id="loginForm" hidden><label class="small" for="loginEmail">Deine E-Mail-Adresse</label><input type="email" id="loginEmail" required placeholder="name@beispiel.de" autocomplete="email" inputmode="email"><button class="btn" type="submit">Anmelde-Link schicken</button><div class="msg" id="loginMsg" aria-live="polite"></div></form>`}</div>
   </footer>`;
+  bind();
+}
+function renderStudioOnly(){
+  const root = $(ROOT_ID); if(!root) return;
+  root.innerHTML = S.editor ? studioHtml() + `<h2 id="h-feed" style="margin-top:8px">Eure letzten Posts</h2>` + (S.posts.length ? S.posts.slice(0,15).map(postHtml).join("") : '<p class="muted">Noch keine Posts.</p>')
+    : '<div class="card"><p>Bitte zuerst anmelden.</p></div>';
   bind();
 }
 function postHtml(p){
@@ -120,10 +130,10 @@ function studioHtml(){
         <label>Wer postet?<select id="pAuthor"><option value="victor">Victor</option><option value="felix" ${store.get("author") === "felix" ? "selected" : ""}>Felix</option></select></label>
         <label>Wo?<select id="pPlace">${PLACES.map(p => `<option ${p === store.get("place") ? "selected" : ""}>${esc(p)}</option>`).join("")}</select></label>
       </div>
-      <div class="quick"><span class="small muted">Nur kurzes Lebenszeichen (wenige Bytes):</span>
-        <button type="button" class="btn ghost small" data-quick="Alles gut, uns geht's prima">Alles gut</button>
-        <button type="button" class="btn ghost small" data-quick="Kein Netz für die nächsten Tage">Kein Netz</button>
-        <button type="button" class="btn ghost small" data-quick="Müde, aber glücklich">Müde & glücklich</button></div>
+      <div class="quick pingrow"><span class="small muted">Nur kurzes Lebenszeichen (wenige Bytes):</span>
+        <button type="button" class="btn ghost small" data-ping="Alles gut, uns geht's prima">Alles gut</button>
+        <button type="button" class="btn ghost small" data-ping="Kein Netz für die nächsten Tage">Kein Netz</button>
+        <button type="button" class="btn ghost small" data-ping="Müde, aber glücklich">Müde & glücklich</button></div>
       <label>Lebenszeichen<select id="pStatus">${STATUSES.map(s => `<option value="${esc(s)}">${s ? esc(s) : "(keins)"}</option>`).join("")}</select></label>
       <label>Text<textarea id="pText" maxlength="4000" placeholder="Was habt ihr heute erlebt?"></textarea></label>
       <label>Fotos oder Videos (bis zu 8)<input id="pMedia" type="file" accept="image/*,video/*" multiple></label>
@@ -244,7 +254,7 @@ function renderOutbox(){
   el.querySelectorAll("[data-drop]").forEach(b => b.addEventListener("click", async () => { if(b.dataset.armed !== "1"){ b.dataset.armed = "1"; b.textContent = "Wirklich verwerfen?"; return; } await IDB.del(b.dataset.drop).catch(() => {}); outbox = outbox.filter(x => x.id !== b.dataset.drop); renderOutbox(); }));
   const sl = $("shareLast"); if(sl) sl.addEventListener("click", () => doShare(S.lastShare.files, S.lastShare.text, $("pMsg")));
 }
-function refreshFeed(){ const f = $("h-feed"); if(!f) return; const sec = f.parentElement; sec.innerHTML = `<h2 id="h-feed">Neues von unterwegs</h2>` + S.posts.map(postHtml).join(""); bind(); }
+function refreshFeed(){ if(MODE === "studio"){ const f = $("pText"); const keep = f ? f.value : ""; renderStudioOnly(); if($("pText")) $("pText").value = keep; return; } const f = $("h-feed"); if(!f) return; const sec = f.parentElement; sec.innerHTML = `<h2 id="h-feed">Neues von unterwegs</h2>` + S.posts.map(postHtml).join(""); bind(); }
 async function queuePost(item){
   outbox.push(item);
   try{ await IDB.put(item); }catch(e){ outboxNote = "Achtung: Zwischenspeichern auf dem Handy nicht möglich, Seite bis zum Ende offen lassen."; }
@@ -318,8 +328,8 @@ function bind(){
   $("pSaver").addEventListener("change", e => store.set("saver", e.target.checked ? "1" : "0"));
   const inp = $("pMedia"), prev = $("pPrev"), msg = $("pMsg");
   const newId = () => (crypto.randomUUID && crypto.randomUUID()) || ("p" + Date.now() + Math.random().toString(36).slice(2));
-  document.querySelectorAll("[data-quick]").forEach(b => b.addEventListener("click", () => {
-    queuePost({ id: newId(), author: $("pAuthor").value, place: $("pPlace").value, status: b.dataset.quick, body: "", files: [], created: Date.now() });
+  document.querySelectorAll("[data-ping]").forEach(b => b.addEventListener("click", () => {
+    queuePost({ id: newId(), author: $("pAuthor").value, place: $("pPlace").value, status: b.dataset.ping, body: "", files: [], created: Date.now() });
     msg.textContent = "Lebenszeichen wird gesendet.";
   }));
   inp.addEventListener("change", async () => {
