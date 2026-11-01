@@ -1,5 +1,7 @@
 (function(){
 "use strict";
+// Schutz gegen Einbetten in fremde Seiten (Clickjacking)
+if(window.top !== window.self){ try{ window.top.location = window.location.href; }catch(e){ document.documentElement.innerHTML = ""; return; } }
 /* ============ DATEN ============ */
 const TRIP_START = new Date(2026,10,13,22,5);
 const TRIP_DAY1 = new Date(2026,10,13);
@@ -186,7 +188,7 @@ function slotBox(slot, label){
   const noteTxt = (state.notes["slot-"+slot]?.text||"").trim();
   const done = files.length || noteTxt;
   const thumbs = files.map(f => {
-    const url = blobUrl(f.id);
+    const url = esc(blobUrl(f.id));
     const isImg = (f.type||"").startsWith("image/");
     return `<a href="${url}" target="_blank" rel="noopener" title="${esc(f.name)}">${isImg ? `<img src="${url}" alt="${esc(f.name)}" loading="lazy">` : `<span class="pdf">PDF</span>`}</a>`;
   }).join("");
@@ -324,7 +326,7 @@ function todoRow(t){
   const prioDot = t.prio === "crit" ? '<span class="chip crit" style="margin-right:6px">wichtig</span>' : "";
   return `<div class="todo ${t.done ? "done" : ""}">
     <input type="checkbox" class="chk" id="c-${esc(key)}" data-check="${esc(key)}" ${t.done ? "checked" : ""} ${(!state.canWrite || t.auto) ? "disabled" : ""} aria-label="${esc(t.t)} erledigt">
-    <label class="tt" for="c-${esc(key)}"><b>${prioDot}${esc(t.t)}</b>${t.sub ? `<div class="sub">${esc(t.sub)}</div>` : ""}${t.link ? `<div class="sub"><a href="${esc(t.link)}" target="_blank" rel="noopener">${esc(t.link.replace(/^https?:\/\//,""))}</a></div>` : ""}${t.auto ? '<div class="sub">Hakt sich automatisch ab, wenn alle drei Platzhalter gefüllt sind.</div>' : ""}</label>
+    <label class="tt" for="c-${esc(key)}"><b>${prioDot}${esc(t.t)}</b>${t.sub ? `<div class="sub">${esc(t.sub)}</div>` : ""}${t.link && /^https:\/\//.test(t.link) ? `<div class="sub"><a href="${esc(t.link)}" target="_blank" rel="noopener">${esc(t.link.replace(/^https?:\/\//,""))}</a></div>` : ""}${t.auto ? '<div class="sub">Hakt sich automatisch ab, wenn alle drei Platzhalter gefüllt sind.</div>' : ""}</label>
     <span class="due">${dueChip}</span></div>`;
 }
 function renderOrga(){
@@ -587,6 +589,7 @@ const SBC = window.SB;
 let ROWS = {};      // coll -> id -> data
 let OPS = ls.get(OPS_KEY) || [];
 let signed = {};    // Pfad -> signierte URL
+let signedAt = Date.now();
 function applyTrip(t){
   if(!t) return;
   DAYS = t.days || []; FLIGHTS = t.flights || []; STAYS = t.stays || []; TREK = t.trek || []; TODOS = t.todos || []; PACK = t.pack || []; PLACES = t.places || {}; QUICK = t.quick || []; TRANSFER = t.transfer || {}; PASSPORTS = t.passports || "";
@@ -644,7 +647,7 @@ const assetsAdapter = {
 };
 async function signPaths(paths){
   const need = paths.filter(p => p && !signed[p]); if(!need.length) return;
-  try{ const { data } = await SBC.storage.from("private").createSignedUrls(need, 60*60*24*7); (data||[]).forEach(x => { if(x.signedUrl) signed[x.path] = x.signedUrl; }); }catch(e){}
+  try{ const { data } = await SBC.storage.from("private").createSignedUrls(need, 60*60*2); (data||[]).forEach(x => { if(x.signedUrl) signed[x.path] = x.signedUrl; }); }catch(e){}
 }
 function blobUrl(id){ return signed[id] || "#"; }
 function updateSync(){
@@ -659,6 +662,7 @@ async function pull(){
   const fresh = {}; (data||[]).forEach(r => { (fresh[r.coll] = fresh[r.coll] || {})[r.id] = r.data; });
   ROWS = fresh; OPS.forEach(localApply);   // eigene, noch nicht gesendete Änderungen behalten
   ls.set(CACHE_KEY, ROWS);
+  if(Date.now() - signedAt > 90*60*1000){ signed = {}; signedAt = Date.now(); }
   const paths = Object.values(ROWS.uploads || {}).flatMap(u => (u.files||[]).map(f => f.id));
   await signPaths(paths);
   rowsToState(); queueRender();
