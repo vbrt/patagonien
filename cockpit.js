@@ -655,7 +655,7 @@ function showGate(msg){
     <a href="index.html" class="small">Zum öffentlichen Blog</a></div>`;
   $("#cLogin").addEventListener("submit", async e => { e.preventDefault();
     const { error } = await SBC.auth.signInWithOtp({ email: $("#cEmail").value.trim(), options: { shouldCreateUser: false, emailRedirectTo: location.origin + location.pathname } });
-    $("#cMsg").textContent = error ? "Diese Adresse ist nicht freigeschaltet." : "Link ist unterwegs. Mail auf diesem Gerät öffnen und antippen."; });
+    if(error) console.warn(error); $("#cMsg").textContent = error ? (window.loginErrorText ? window.loginErrorText(error) : error.message) : "Link ist unterwegs. Mail auf diesem Gerät öffnen und antippen."; });
 }
 
 let renderQueued = false;

@@ -49,6 +49,14 @@ async function loadWeather(){
 }
 const WMO = {0:["☀️","Klar"],1:["🌤️","Überwiegend klar"],2:["⛅","Teils bewölkt"],3:["☁️","Bedeckt"],45:["🌫️","Nebel"],48:["🌫️","Raureifnebel"],51:["🌦️","Leichter Niesel"],53:["🌦️","Niesel"],55:["🌧️","Starker Niesel"],56:["🌧️","Gefrierender Niesel"],57:["🌧️","Gefrierender Niesel"],61:["🌧️","Leichter Regen"],63:["🌧️","Regen"],65:["🌧️","Starker Regen"],66:["🌧️","Gefrierender Regen"],67:["🌧️","Gefrierender Regen"],71:["🌨️","Leichter Schneefall"],73:["🌨️","Schneefall"],75:["❄️","Starker Schneefall"],77:["🌨️","Schneegriesel"],80:["🌦️","Regenschauer"],81:["🌧️","Regenschauer"],82:["⛈️","Heftige Schauer"],85:["🌨️","Schneeschauer"],86:["❄️","Starke Schneeschauer"],95:["⛈️","Gewitter"],96:["⛈️","Gewitter mit Hagel"],99:["⛈️","Gewitter mit Hagel"]};
 
+function loginErrorText(error){
+  const m = (error && (error.message || error.msg || "")) + "";
+  if(/rate limit|too many|seconds/i.test(m)) return "Zu viele Anmelde-Mails in kurzer Zeit. Supabase erlaubt nur wenige pro Stunde. Bitte später erneut versuchen oder den letzten Link aus dem Postfach nutzen.";
+  if(/signups? not allowed|not found|user not/i.test(m)) return "Diese Adresse ist in Supabase nicht als Nutzer angelegt (Authentication → Users).";
+  if(/redirect/i.test(m)) return "Die Weiterleitungs-Adresse ist in Supabase nicht erlaubt (URL Configuration → Redirect URLs).";
+  return "Anmeldung fehlgeschlagen: " + m;
+}
+window.loginErrorText = loginErrorText;
 /* ---------- Render ---------- */
 function render(){
   if(MODE === "studio") return renderStudioOnly();
@@ -302,8 +310,8 @@ function bind(){
   const lf = $("loginForm");
   if(lf) lf.addEventListener("submit", async e => { e.preventDefault(); const m = $("loginMsg");
     if(DEMO){ m.textContent = "In der Vorschau gibt es keine Anmeldung."; return; }
-    const { error } = await sb.auth.signInWithOtp({ email: $("loginEmail").value.trim(), options: { shouldCreateUser:false, emailRedirectTo: SITE } });
-    m.textContent = error ? "Diese Adresse ist nicht freigeschaltet." : "Link ist unterwegs. Bitte E-Mail öffnen und auf dem Handy antippen."; });
+    const { error } = await sb.auth.signInWithOtp({ email: $("loginEmail").value.trim(), options: { shouldCreateUser:false, emailRedirectTo: location.origin + location.pathname } });
+    if(error) console.warn(error); m.textContent = error ? loginErrorText(error) : "Link ist unterwegs. Bitte E-Mail öffnen und auf dem Handy antippen."; });
   const lo = $("logout"); if(lo) lo.addEventListener("click", async () => { if(sb) await sb.auth.signOut(); S.editor = false; S.lastShare = null; render(); });
   if(!S.editor) return;
 
