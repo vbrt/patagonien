@@ -100,8 +100,8 @@ function postHtml(p){
     ${p.status ? `<div class="st">● ${esc(p.status)}</div>` : ""}
     ${p.body ? `<p class="txt">${esc(p.body)}</p>` : ""}
     ${n ? `<div class="media ${cls}">${media.map((m,i) => m.type && m.type.startsWith("video/")
-        ? `<video src="${esc(mediaUrl(m.path))}" controls playsinline preload="metadata"></video>`
-        : `<button type="button" data-lb="${esc(mediaUrl(m.path))}" aria-label="Foto ${i+1} groß anzeigen"><img src="${esc(mediaUrl(m.path))}" alt="Foto von ${who.name}, ${esc(p.place)}" loading="lazy"></button>`).join("")}</div>` : ""}
+        ? `<video src="${esc(mediaUrl(m.path))}" controls playsinline preload="none"></video>`
+        : `<button type="button" data-lb="${esc(mediaUrl(m.path))}" aria-label="Foto ${i+1} groß anzeigen"><img src="${esc(mediaUrl(m.thumb || m.path))}" alt="Foto von ${who.name}, ${esc(p.place)}" loading="lazy"></button>`).join("")}</div>` : ""}
     <div class="react" role="group" aria-label="Reaktionen">${REACTIONS.map(e => { const mine = store.get("rx:"+p.id+":"+e); return `<button type="button" class="${mine ? "mine" : ""}" data-rx="${esc(p.id)}" data-emoji="${e}" aria-label="${e} Reaktion">${e} ${rx[e] ? rx[e] : ""}</button>`; }).join("")}
       ${S.editor ? `<button type="button" class="btn wa small" data-share="${esc(p.id)}" style="margin-left:auto">Per WhatsApp teilen</button>` : ""}</div>
     <div class="comments">
@@ -111,20 +111,23 @@ function postHtml(p){
   </article>`;
 }
 function studioHtml(){
-  const ls = S.lastShare;
+  const saver = store.get("saver") !== "0";
   return `<section class="card studio" aria-labelledby="h-studio"><h2 id="h-studio">Neuer Post</h2>
-    <p class="small muted" style="margin:4px 0 0">Nur für euch beide sichtbar. Nach „Veröffentlichen“ steht der Post sofort im Blog.</p>
-    ${ls ? `<div class="sharebox" style="margin-top:10px"><b>Veröffentlicht! Jetzt an eure WhatsApp-Broadcast-Liste schicken:</b>
-      <button type="button" class="btn wa" id="shareLast">Per WhatsApp teilen</button>
-      <span class="small muted">Im Teilen-Menü WhatsApp wählen, dann eure Broadcast-Liste. Der Text liegt zusätzlich in der Zwischenablage, falls WhatsApp ihn beim Bild weglässt: einfach einfügen.</span></div>` : ""}
+    <p class="small muted" style="margin:4px 0 0">Nur für euch beide sichtbar. Posts werden im Hintergrund hochgeladen und bei schlechtem Netz automatisch wiederholt, auch nach dem Schließen der Seite.</p>
+    <div id="outbox"></div>
     <form id="postForm">
       <div class="row2">
         <label>Wer postet?<select id="pAuthor"><option value="victor">Victor</option><option value="felix" ${store.get("author") === "felix" ? "selected" : ""}>Felix</option></select></label>
-        <label>Wo?<select id="pPlace">${PLACES.map(p => `<option>${esc(p)}</option>`).join("")}</select></label>
+        <label>Wo?<select id="pPlace">${PLACES.map(p => `<option ${p === store.get("place") ? "selected" : ""}>${esc(p)}</option>`).join("")}</select></label>
       </div>
+      <div class="quick"><span class="small muted">Nur kurzes Lebenszeichen (wenige Bytes):</span>
+        <button type="button" class="btn ghost small" data-quick="Alles gut, uns geht's prima">Alles gut</button>
+        <button type="button" class="btn ghost small" data-quick="Kein Netz für die nächsten Tage">Kein Netz</button>
+        <button type="button" class="btn ghost small" data-quick="Müde, aber glücklich">Müde & glücklich</button></div>
       <label>Lebenszeichen<select id="pStatus">${STATUSES.map(s => `<option value="${esc(s)}">${s ? esc(s) : "(keins)"}</option>`).join("")}</select></label>
       <label>Text<textarea id="pText" maxlength="4000" placeholder="Was habt ihr heute erlebt?"></textarea></label>
-      <label>Fotos oder Videos (bis zu 8, Videos max. 50 MB)<input id="pMedia" type="file" accept="image/*,video/*" multiple></label>
+      <label>Fotos oder Videos (bis zu 8)<input id="pMedia" type="file" accept="image/*,video/*" multiple></label>
+      <label class="chk"><input type="checkbox" id="pSaver" ${saver ? "checked" : ""}> Sparmodus: kleinere Fotos, ideal bei schwachem Netz</label>
       <div class="previews" id="pPrev"></div>
       <div><button class="btn" type="submit" id="pSubmit">Veröffentlichen</button></div>
       <div class="msg" id="pMsg" aria-live="polite"></div>
@@ -161,17 +164,91 @@ function trekHtml(){
     return `<div class="stage ${iso === t ? "now" : ""}"><div class="dd">${s.d}<span>${s.wd}</span></div><div><b>${esc(s.t)}</b>${iso === t ? '<span class="tag">Heute</span>' : ""}${s.key ? '<span class="tag red">Königsetappe</span>' : ""}<div class="km">${String(s.km).replace(".",",")} km · ${s.h}</div><div class="small">${esc(s.x)}</div></div></div>`; }).join("");
 }
 
-/* ---------- Medien & Teilen ---------- */
+/* ---------- Medien, Warteschlange & Teilen ---------- */
 let pending = [];
-function resizeImage(file){
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const fmtKB = n => n > 1048576 ? (n/1048576).toFixed(1).replace(".",",") + " MB" : Math.max(1, Math.round(n/1024)) + " KB";
+function scaleImage(file, max, q){
   return new Promise((res, rej) => {
     const url = URL.createObjectURL(file); const img = new Image();
-    img.onload = () => { const max = 1800; let w = img.naturalWidth, h = img.naturalHeight; const r = Math.min(1, max/Math.max(w,h)); w = Math.round(w*r); h = Math.round(h*r);
+    img.onload = () => { let w = img.naturalWidth, h = img.naturalHeight; const r = Math.min(1, max/Math.max(w,h)); w = Math.round(w*r); h = Math.round(h*r);
       const c = document.createElement("canvas"); c.width = w; c.height = h; c.getContext("2d").drawImage(img,0,0,w,h); URL.revokeObjectURL(url);
-      c.toBlob(b => b ? res(new File([b], (file.name.replace(/\.[^.]+$/,"") || "foto") + ".jpg", {type:"image/jpeg"})) : rej(new Error("Bild")), "image/jpeg", 0.8); };
+      c.toBlob(b => b ? res(b) : rej(new Error("Bild")), "image/jpeg", q); };
     img.onerror = () => { URL.revokeObjectURL(url); rej(new Error("Bild nicht lesbar")); };
     img.src = url;
   });
+}
+async function prepareFile(f, saver){
+  if(f.type.startsWith("video/")) return { name: f.name, type: f.type || "video/mp4", full: f, thumb: null };
+  const full = await scaleImage(f, saver ? 1280 : 1800, saver ? 0.62 : 0.76);
+  const thumb = await scaleImage(f, 640, 0.6);
+  return { name: (f.name.replace(/\.[^.]+$/,"") || "foto") + ".jpg", type: "image/jpeg", full, thumb };
+}
+/* IndexedDB: Posts überleben Funklöcher und das Schließen der Seite */
+const IDB = {
+  db: null,
+  open(){ return this.db || (this.db = new Promise((res, rej) => { const r = indexedDB.open("patagonien", 1); r.onupgradeneeded = () => r.result.createObjectStore("outbox", {keyPath:"id"}); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); })); },
+  async tx(mode, fn){ const db = await this.open(); return new Promise((res, rej) => { const t = db.transaction("outbox", mode); const s = t.objectStore("outbox"); const out = fn(s); t.oncomplete = () => res(out && out.result); t.onerror = () => rej(t.error); }); },
+  all(){ return this.tx("readonly", s => s.getAll()); },
+  put(item){ return this.tx("readwrite", s => s.put(item)); },
+  del(id){ return this.tx("readwrite", s => s.delete(id)); }
+};
+let outbox = [], outboxBusy = false, outboxNote = "";
+async function loadOutbox(){ try{ outbox = await IDB.all() || []; }catch(e){ outbox = []; } }
+function withTimeout(promise, ms){ return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error("Zeitüberschreitung")), ms))]); }
+async function uploadOnce(path, blob, type){
+  if(DEMO){ await sleep(300); return; }
+  const r = await withTimeout(sb.storage.from(BUCKET).upload(path, blob, { contentType: type, upsert: false, cacheControl: "31536000" }), Math.max(45000, blob.size / 12));
+  if(r.error && !/exist|duplicate/i.test(r.error.message || "")) throw r.error;
+}
+async function processOutbox(){
+  if(outboxBusy || !outbox.length || !S.editor) return;
+  if(navigator.onLine === false){ outboxNote = "Kein Netz. Sobald wieder Empfang da ist, geht es automatisch weiter."; renderOutbox(); return; }
+  outboxBusy = true;
+  for(const item of [...outbox]){
+    try{
+      for(const [i,f] of item.files.entries()){
+        if(f.thumb && !f.thumbPath){ outboxNote = `Vorschau ${i+1}/${item.files.length} …`; renderOutbox(); const tp = `${item.id}/${i+1}-t.jpg`; await uploadOnce(tp, f.thumb, "image/jpeg"); f.thumbPath = tp; await IDB.put(item); }
+        if(!f.path){ outboxNote = `Datei ${i+1}/${item.files.length} (${fmtKB(f.full.size)}) …`; renderOutbox(); const ext = (f.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g,"") || "bin"; const pth = `${item.id}/${i+1}.${ext}`; await uploadOnce(pth, f.full, f.type); f.path = pth; await IDB.put(item); }
+      }
+      outboxNote = "Speichere Post …"; renderOutbox();
+      const post = { id: item.id, author: item.author, place: item.place, status: item.status, body: item.body, media: item.files.map(f => ({ path: DEMO ? URL.createObjectURL(f.full) : f.path, thumb: DEMO ? (f.thumb ? URL.createObjectURL(f.thumb) : null) : (f.thumbPath || null), type: f.type })) };
+      let saved = { ...post, created_at: new Date().toISOString() };
+      if(!DEMO){ const { data, error } = await withTimeout(sb.from("posts").upsert(post, { onConflict: "id" }).select().single(), 30000); if(error) throw error; saved = data; }
+      await IDB.del(item.id); outbox = outbox.filter(x => x.id !== item.id);
+      if(!S.posts.some(x => x.id === saved.id)) S.posts.unshift(saved);
+      S.lastShare = { files: item.files.map((f,i) => new File([f.full], `patagonien-${i+1}.${(f.type.split("/")[1]||"jpg").replace("quicktime","mov")}`, { type: f.type })), text: shareText(post) };
+      outboxNote = "";
+      const form = $("postForm"); const busy = form && ($("pText").value || pending.length);
+      if(busy){ renderOutbox(); refreshFeed(); } else render();
+    }catch(err){
+      console.warn(err); item.tries = (item.tries || 0) + 1; await IDB.put(item).catch(() => {});
+      outboxNote = "Netz zu schwach, neuer Versuch in Kürze …"; renderOutbox();
+      outboxBusy = false; setTimeout(processOutbox, Math.min(120000, 10000 * item.tries)); return;
+    }
+  }
+  outboxBusy = false; renderOutbox();
+}
+function renderOutbox(){
+  const el = $("outbox"); if(!el) return;
+  const ls = S.lastShare;
+  el.innerHTML = `${outbox.map(it => { const done = it.files.filter(f => f.path).length; const size = it.files.reduce((n,f) => n + (f.path ? 0 : f.full.size) + (f.thumb && !f.thumbPath ? f.thumb.size : 0), 0);
+      return `<div class="sharebox" style="margin-top:10px;background:var(--bg);border-color:var(--trail)"><b>Wird hochgeladen: ${esc(it.place)}${it.body ? " · " + esc(it.body.slice(0,40)) : ""}</b>
+        <span class="small">${it.files.length ? `${done} von ${it.files.length} Dateien fertig · noch ${fmtKB(size)}` : "nur Text"}${it.tries ? ` · Versuch ${it.tries + 1}` : ""}</span>
+        <span class="small muted">${esc(outboxNote)}</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn small" data-retry>Jetzt erneut versuchen</button><button type="button" class="btn danger" data-drop="${esc(it.id)}">Verwerfen</button></div></div>`; }).join("")}
+    ${ls ? `<div class="sharebox" style="margin-top:10px"><b>Veröffentlicht! Jetzt an eure WhatsApp-Broadcast-Liste schicken:</b>
+      <button type="button" class="btn wa" id="shareLast">Per WhatsApp teilen</button>
+      <span class="small muted">WhatsApp wählen, dann eure Broadcast-Liste. Der Text liegt auch in der Zwischenablage. Tipp bei schwachem Netz: WhatsApp verschickt die Nachricht von selbst, sobald wieder Empfang da ist.</span></div>` : ""}`;
+  el.querySelectorAll("[data-retry]").forEach(b => b.addEventListener("click", () => { outboxBusy = false; processOutbox(); }));
+  el.querySelectorAll("[data-drop]").forEach(b => b.addEventListener("click", async () => { if(b.dataset.armed !== "1"){ b.dataset.armed = "1"; b.textContent = "Wirklich verwerfen?"; return; } await IDB.del(b.dataset.drop).catch(() => {}); outbox = outbox.filter(x => x.id !== b.dataset.drop); renderOutbox(); }));
+  const sl = $("shareLast"); if(sl) sl.addEventListener("click", () => doShare(S.lastShare.files, S.lastShare.text, $("pMsg")));
+}
+function refreshFeed(){ const f = $("h-feed"); if(!f) return; const sec = f.parentElement; sec.innerHTML = `<h2 id="h-feed">Neues von unterwegs</h2>` + S.posts.map(postHtml).join(""); bind(); }
+async function queuePost(item){
+  outbox.push(item);
+  try{ await IDB.put(item); }catch(e){ outboxNote = "Achtung: Zwischenspeichern auf dem Handy nicht möglich, Seite bis zum Ende offen lassen."; }
+  renderOutbox(); processOutbox();
 }
 function shareText(p){
   const who = (PEOPLE[p.author] || PEOPLE.victor).name;
@@ -235,38 +312,38 @@ function bind(){
     const files = await filesForPost(p); b.disabled = false; b.textContent = "Per WhatsApp teilen";
     await doShare(files, shareText(p), null);
   }));
-  const sl = $("shareLast"); if(sl) sl.addEventListener("click", () => doShare(S.lastShare.files, S.lastShare.text, $("pMsg")));
+  renderOutbox();
   $("pAuthor").addEventListener("change", e => store.set("author", e.target.value));
+  $("pPlace").addEventListener("change", e => store.set("place", e.target.value));
+  $("pSaver").addEventListener("change", e => store.set("saver", e.target.checked ? "1" : "0"));
   const inp = $("pMedia"), prev = $("pPrev"), msg = $("pMsg");
+  const newId = () => (crypto.randomUUID && crypto.randomUUID()) || ("p" + Date.now() + Math.random().toString(36).slice(2));
+  document.querySelectorAll("[data-quick]").forEach(b => b.addEventListener("click", () => {
+    queuePost({ id: newId(), author: $("pAuthor").value, place: $("pPlace").value, status: b.dataset.quick, body: "", files: [], created: Date.now() });
+    msg.textContent = "Lebenszeichen wird gesendet.";
+  }));
   inp.addEventListener("change", async () => {
-    pending = []; prev.innerHTML = ""; const files = [...inp.files].slice(0,8);
-    for(const f of files){
-      if(f.type.startsWith("video/")){ if(f.size > 50*1024*1024){ msg.textContent = `„${f.name}“ ist größer als 50 MB und wird übersprungen.`; continue; } pending.push(f); prev.insertAdjacentHTML("beforeend", `<video src="${URL.createObjectURL(f)}" muted></video>`); }
-      else { try{ const r = await resizeImage(f); pending.push(r); prev.insertAdjacentHTML("beforeend", `<img src="${URL.createObjectURL(r)}" alt="">`); }catch(e){ msg.textContent = "Ein Foto konnte nicht gelesen werden."; } }
+    pending = []; prev.innerHTML = ""; const files = [...inp.files].slice(0,8); const saver = $("pSaver").checked;
+    $("pSubmit").disabled = true;
+    for(const [i,f] of files.entries()){
+      msg.textContent = `Bereite ${i+1} von ${files.length} vor …`;
+      if(f.type.startsWith("video/") && f.size > 50*1024*1024){ msg.textContent = `„${f.name}“ ist größer als 50 MB und wird übersprungen.`; continue; }
+      try{ const pf = await prepareFile(f, saver); pending.push(pf);
+        prev.insertAdjacentHTML("beforeend", pf.type.startsWith("video/") ? `<video src="${URL.createObjectURL(pf.full)}" muted></video>` : `<img src="${URL.createObjectURL(pf.thumb)}" alt="">`); }
+      catch(e){ msg.textContent = "Ein Foto konnte nicht gelesen werden."; }
     }
-    if(pending.length) msg.textContent = `${pending.length} Datei(en) bereit.`;
+    $("pSubmit").disabled = false;
+    const total = pending.reduce((n,f) => n + f.full.size + (f.thumb ? f.thumb.size : 0), 0);
+    const hasVideo = pending.some(f => f.type.startsWith("video/"));
+    if(pending.length) msg.textContent = `${pending.length} Datei(en), zusammen ${fmtKB(total)} Upload.` + (hasVideo ? " Videos werden nicht verkleinert, bei schwachem Netz lieber Fotos." : "");
   });
-  $("postForm").addEventListener("submit", async e => {
+  $("postForm").addEventListener("submit", e => {
     e.preventDefault();
     const body = $("pText").value.trim(), status = $("pStatus").value;
     if(!body && !pending.length && !status){ msg.textContent = "Schreib etwas, wähl ein Lebenszeichen oder häng ein Foto an."; return; }
-    const btn = $("pSubmit"); btn.disabled = true;
-    const id = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now());
-    const post = { id, author: $("pAuthor").value, place: $("pPlace").value, status, body, media: [] };
-    try{
-      for(const [i,f] of pending.entries()){
-        msg.textContent = `Lade ${i+1} von ${pending.length} hoch …`;
-        const ext = (f.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g,"");
-        const path = `${id}/${i+1}-${Date.now()}.${ext}`;
-        if(!DEMO){ const { error } = await sb.storage.from(BUCKET).upload(path, f, { contentType: f.type, upsert:false }); if(error) throw error; post.media.push({path, type:f.type}); }
-        else post.media.push({path: URL.createObjectURL(f), type:f.type});
-      }
-      msg.textContent = "Speichere Post …";
-      if(!DEMO){ const { data, error } = await sb.from("posts").insert(post).select().single(); if(error) throw error; S.posts.unshift(data); }
-      else S.posts.unshift({...post, created_at:new Date().toISOString()});
-      S.lastShare = { files: pending, text: shareText(post) }; pending = [];
-      render(); window.scrollTo({top:0, behavior:"smooth"});
-    }catch(err){ console.error(err); msg.textContent = "Veröffentlichen hat nicht geklappt: " + (err.message || "unbekannter Fehler"); btn.disabled = false; }
+    queuePost({ id: newId(), author: $("pAuthor").value, place: $("pPlace").value, status, body, files: pending, created: Date.now() });
+    pending = []; $("pText").value = ""; $("pStatus").value = ""; inp.value = ""; prev.innerHTML = "";
+    msg.textContent = "In der Warteschlange. Du kannst weitermachen oder die Seite schließen, der Upload läuft beim nächsten Öffnen weiter.";
   });
 }
 function alertMsg(el, t){ let m = el.querySelector(".msg"); if(!m){ m = document.createElement("div"); m.className = "msg"; el.after(m); } m.textContent = t; }
@@ -286,9 +363,12 @@ function demoData(){
 
 /* ---------- Start ---------- */
 (async () => {
-  await checkEditor(); await loadAll(); render();
+  await checkEditor(); await loadOutbox(); await loadAll(); render(); processOutbox();
+  window.addEventListener("online", () => { outboxBusy = false; processOutbox(); });
+  document.addEventListener("visibilitychange", () => { if(document.visibilityState === "visible") processOutbox(); });
+  if("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
   loadWeather().then(render);
-  if(sb) sb.auth.onAuthStateChange(async (ev) => { if(ev === "SIGNED_IN" || ev === "SIGNED_OUT"){ await checkEditor(); render(); } });
-  setInterval(async () => { if(document.visibilityState !== "visible") return; const a = document.activeElement; if(a && a.matches("input,textarea,select")) return; await loadAll(); render(); }, 90000);
+  if(sb) sb.auth.onAuthStateChange(async (ev) => { if(ev === "SIGNED_IN" || ev === "SIGNED_OUT"){ await checkEditor(); render(); processOutbox(); } });
+  setInterval(async () => { if(document.visibilityState !== "visible") return; const a = document.activeElement; if(a && a.matches("input,textarea,select")) return; if(pending.length || ($("pText") && $("pText").value)) return; await loadAll(); render(); }, 90000);
 })();
 })();

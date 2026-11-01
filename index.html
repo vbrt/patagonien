@@ -105,6 +105,10 @@ main{display:grid;gap:22px;padding:22px 0 40px}
 .previews{display:flex;gap:6px;flex-wrap:wrap}
 .previews img,.previews video{width:72px;height:72px;object-fit:cover;border-radius:6px;background:#000}
 .msg{font-size:.9rem;min-height:1.2em}
+.quick{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.quick .btn{min-height:40px}
+.studio label.chk{display:flex;gap:8px;align-items:center;font-weight:400;font-size:.9rem}
+.studio label.chk input{width:20px;height:20px}
 .sharebox{background:color-mix(in srgb,#1f8f4e 10%,var(--surface));border:1px solid #1f8f4e;border-radius:10px;padding:12px 14px;display:grid;gap:8px}
 .empty{text-align:center;padding:30px 18px}
 .lb{position:fixed;inset:0;background:rgba(5,8,10,.92);display:none;align-items:center;justify-content:center;z-index:20;padding:16px}
@@ -171,8 +175,8 @@ input,select,textarea{font-size:16px}
 <div id="app"><p class="col" style="padding:40px 16px">Lädt …</p></div>
 <div class="lb" id="lb" role="dialog" aria-modal="true" aria-label="Foto"><button type="button" id="lbClose">Schließen</button><img id="lbImg" alt=""></div>
 <script src="vendor/supabase.js?v=2.45.4"></script>
-<script src="config.js?v=4"></script>
-<script src="data.js?v=4"></script>
-<script src="app.js?v=4"></script>
+<script src="config.js?v=5"></script>
+<script src="data.js?v=5"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>
