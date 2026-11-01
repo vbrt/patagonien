@@ -82,8 +82,9 @@ function render(){
       <div class="crew">${["felix","victor"].map(k => `<div class="card mate"><img src="${PEOPLE[k].img}" alt="${PEOPLE[k].name}"><div><span class="nick">${esc(PEOPLE[k].nick)}</span><b>${PEOPLE[k].name}</b><span class="small muted">${esc(PEOPLE[k].bio)}</span></div></div>`).join("")}</div></section>
   </main>
   <footer class="col">Mit Liebe aus Patagonien · Victor &amp; Felix
-    ${S.editor ? `<div class="login"><span>Angemeldet als ${esc(S.session?.user?.email || "Redaktion")}</span><button class="btn ghost small" type="button" id="logout">Abmelden</button></div>`
-      : `<details style="margin-top:10px"><summary>Für Victor &amp; Felix</summary><form class="login" id="loginForm"><input type="email" id="loginEmail" required placeholder="E-Mail-Adresse" autocomplete="email"><button class="btn small" type="submit">Anmelde-Link schicken</button></form><div class="msg" id="loginMsg"></div></details>`}
+    <div class="team">${S.editor ? `<div class="small" style="text-align:center">Angemeldet als ${esc(S.session?.user?.email || "Redaktion")}</div><button class="teambtn" type="button" id="logout">Abmelden</button>`
+      : `<button class="teambtn" type="button" id="loginToggle" aria-expanded="false" aria-controls="loginForm">Anmelden für Victor &amp; Felix</button>
+         <form class="login" id="loginForm" hidden><label class="small" for="loginEmail">Deine E-Mail-Adresse</label><input type="email" id="loginEmail" required placeholder="name@beispiel.de" autocomplete="email" inputmode="email"><button class="btn" type="submit">Anmelde-Link schicken</button><div class="msg" id="loginMsg" aria-live="polite"></div></form>`}</div>
   </footer>`;
   bind();
 }
@@ -210,6 +211,7 @@ function bind(){
     if(!DEMO){ const { data, error } = await sb.from("comments").insert({post_id:id, name, body}).select().single(); if(error){ btn.disabled = false; alertMsg(f, /Zu viele/.test(error.message||"") ? "Gerade kommen sehr viele Kommentare. Bitte in ein paar Minuten nochmal." : "Hat nicht geklappt, bitte nochmal."); return; } row.id = data.id; row.created_at = data.created_at; }
     (S.comments[id] = S.comments[id] || []).push(row); render();
   }));
+  const lt = $("loginToggle"); if(lt) lt.addEventListener("click", () => { const f = $("loginForm"); f.hidden = !f.hidden; lt.setAttribute("aria-expanded", String(!f.hidden)); if(!f.hidden){ $("loginEmail").focus(); f.scrollIntoView({behavior:"smooth", block:"center"}); } });
   const lf = $("loginForm");
   if(lf) lf.addEventListener("submit", async e => { e.preventDefault(); const m = $("loginMsg");
     if(DEMO){ m.textContent = "In der Vorschau gibt es keine Anmeldung."; return; }
