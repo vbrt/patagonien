@@ -297,11 +297,11 @@ function ringSvg(){
 
 /* ============ ORTE ============ */
 let place = "ush";
-function renderOrte(){
-  const v = $("#v-orte");
-  const p = PLACES[place];
+function renderGuides(){
+  const v = $("#guideArea"); if(!v) return;
+  const p = PLACES[place]; if(!p){ v.innerHTML = ""; return; }
   const order = [["ba","Buenos Aires"],["ush","Ushuaia"],["cal","El Calafate"],["tdp","Torres del Paine"]];
-  v.innerHTML = `<div class="sechead"><h2>Orte & Tipps</h2></div>
+  v.innerHTML = `<h3 style="text-transform:uppercase;letter-spacing:.05em;margin:6px 0 8px">Reiseführer</h3>
   <div class="placetabs" role="group" aria-label="Ort wählen">${order.map(([k,n]) => `<button type="button" data-p="${k}" aria-pressed="${k===place}">${n}</button>`).join("")}</div>
   <div class="card place"><p style="margin:0 0 6px">${esc(p.intro)}</p>
     <h3>Nicht verpassen</h3><div class="tips">${p.must.map(([k,t],i) => `<div class="tip"><span class="k">${i+1}</span><div><b>${esc(k)}</b> · ${esc(t)}</div></div>`).join("")}</div>
@@ -311,8 +311,124 @@ function renderOrte(){
     <div class="card place"><h3>Praktisch</h3><ul class="dots">${p.practical.map(t => `<li>${esc(t)}</li>`).join("")}</ul></div>
   </div>
   <div class="card"><h3>Eure Ideen für ${esc(p.name)}</h3>${noteBox("ort-"+place, "Restaurant-Tipps von Freunden, Ideen, Fundstücke …")}</div>`;
-  v.querySelector(".placetabs").addEventListener("click", e => { const b = e.target.closest("button"); if(!b) return; place = b.dataset.p; renderOrte(); });
+  v.querySelector(".placetabs").addEventListener("click", e => { const b = e.target.closest("button"); if(!b) return; place = b.dataset.p; renderGuides(); });
   bindNotes(v);
+}
+
+/* ============ GEMERKTE ORTE (Tipps aus Instagram & Co.) ============ */
+const SPOT_CATS = { essen: ["Essen", "#d26a12"], bar: ["Café & Bar", "#8e44ad"], aussicht: ["Aussicht", "#0d6f7b"], wandern: ["Wandern", "#2f7a45"], erlebnis: ["Erlebnis", "#c0392b"], sonst: ["Sonstiges", "#5d6b74"] };
+const SPOT_REGIONS = [
+  { k: "ba", n: "Buenos Aires", lat: -34.60, lon: -58.40, z: 12 },
+  { k: "ush", n: "Ushuaia", lat: -54.80, lon: -68.30, z: 12 },
+  { k: "cal", n: "El Calafate", lat: -50.34, lon: -72.27, z: 11 },
+  { k: "tdp", n: "Torres del Paine", lat: -51.00, lon: -73.00, z: 10 }
+];
+let spotMap = null, spotLayer = null, spotRegion = "alle", spotPick = null, spotPickMarker = null, spotSearchTimer = null;
+function nearestRegion(lat, lon){ let best = null, bd = 1e9; SPOT_REGIONS.forEach(r => { const d = (r.lat-lat)**2 + (r.lon-lon)**2; if(d < bd){ bd = d; best = r; } }); return best ? best.k : ""; }
+function gmaps(s){ return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(s.lat + "," + s.lon); }
+function safeLink(u){ return /^https:\/\//i.test(u || "") ? u : ""; }
+function spotsHtml(){
+  return `<div class="card" id="spotCard">
+    <div class="sechead"><h3>Gemerkte Orte</h3><span class="small muted">${(state.spots||[]).length} Tipps</span></div>
+    <div class="placetabs" id="spotRegions" role="group" aria-label="Gegend">${[["alle","Alle"], ...SPOT_REGIONS.map(r => [r.k, r.n])].map(([k,n]) => `<button type="button" data-sr="${k}" aria-pressed="${k === spotRegion}">${esc(n)}</button>`).join("")}</div>
+    <div id="spotMap" class="spotmap" role="application" aria-label="Karte mit gemerkten Orten"></div>
+    <p class="small muted" style="margin:4px 0 0">Karte braucht Netz. Ohne Netz bleibt die Liste unten nutzbar. Kartendaten © OpenStreetMap.</p>
+    ${state.canWrite ? `<details class="more" id="spotAdd" style="margin-top:10px"><summary>+ Tipp hinzufügen</summary>
+      <form class="spotform" id="spotForm">
+        <label>Link (Instagram-Reel, TikTok, Website …)<input id="spLink" inputmode="url" placeholder="https://www.instagram.com/reel/…"></label>
+        <label>Beschreibung aus dem Reel (optional, zum Erkennen des 📍-Orts)<textarea id="spCap" rows="2" placeholder="Beschreibung im Reel kopieren und hier einfügen"></textarea></label>
+        <label>Ort suchen<input id="spQuery" autocomplete="off" placeholder="z. B. Don Julio Buenos Aires"></label>
+        <div id="spResults" class="spresults"></div>
+        <p class="small muted" style="margin:0">Nichts gefunden? Einfach auf die Karte tippen, um die Markierung selbst zu setzen.</p>
+        <div class="row2"><label>Name<input id="spName" maxlength="80" required placeholder="Name des Ortes"></label>
+          <label>Art<select id="spCat">${Object.entries(SPOT_CATS).map(([k,[n]]) => `<option value="${k}">${esc(n)}</option>`).join("")}</select></label></div>
+        <label>Notiz<input id="spNote" maxlength="200" placeholder="z. B. Empanadas probieren, reservieren"></label>
+        <div><button class="btn" type="submit" id="spSave">Merken</button> <span class="small muted" id="spMsg"></span></div>
+      </form></details>` : ""}
+    <div id="spotList" style="margin-top:10px"></div>
+  </div>`;
+}
+function spotListHtml(){
+  const list = (state.spots||[]).filter(s => spotRegion === "alle" || s.region === spotRegion).sort((a,b) => (b.at||0) - (a.at||0));
+  if(!list.length) return '<p class="muted small">Noch keine Tipps in dieser Gegend.</p>';
+  return list.map(s => { const [cn, col] = SPOT_CATS[s.cat] || SPOT_CATS.sonst; const link = safeLink(s.link);
+    return `<div class="spot"><span class="dot" style="background:${col}"></span><div><b>${esc(s.name)}</b> <span class="small muted">· ${esc(cn)}${s.region ? " · " + esc((SPOT_REGIONS.find(r => r.k === s.region)||{}).n || "") : ""}</span>
+      ${s.note ? `<div class="small">${esc(s.note)}</div>` : ""}
+      <div class="small"><a href="${esc(gmaps(s))}" target="_blank" rel="noopener">In Google Maps</a>${link ? ` · <a href="${esc(link)}" target="_blank" rel="noopener">Tipp öffnen</a>` : ""} · <button type="button" class="copy" data-spfly="${esc(s.id)}">auf Karte</button>${state.canWrite ? ` · <button type="button" class="copy" data-spdel="${esc(s.id)}">löschen</button>` : ""}</div></div></div>`; }).join("");
+}
+function initSpotMap(){
+  const el = $("#spotMap"); if(!el || !window.L) return;
+  if(spotMap){ try{ spotMap.remove(); }catch(e){} spotMap = null; }
+  spotMap = L.map(el, { zoomControl: true, attributionControl: true }).setView([-45, -66], 4);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(spotMap);
+  spotLayer = L.layerGroup().addTo(spotMap);
+  spotMap.on("click", e => { if(!$("#spotAdd")) return; $("#spotAdd").open = true; setPick(e.latlng.lat, e.latlng.lng, $("#spName").value || ""); $("#spMsg").textContent = "Markierung gesetzt. Name eintragen und merken."; });
+  drawSpots(true);
+}
+function drawSpots(fit){
+  if(!spotMap || !spotLayer) return;
+  spotLayer.clearLayers();
+  const list = (state.spots||[]).filter(s => spotRegion === "alle" || s.region === spotRegion);
+  list.forEach(s => { const col = (SPOT_CATS[s.cat] || SPOT_CATS.sonst)[1]; const link = safeLink(s.link);
+    L.circleMarker([s.lat, s.lon], { radius: 9, color: "#fff", weight: 2, fillColor: col, fillOpacity: .95 }).addTo(spotLayer)
+      .bindPopup(`<b>${esc(s.name)}</b>${s.note ? "<br>" + esc(s.note) : ""}<br><a href="${esc(gmaps(s))}" target="_blank" rel="noopener">Google Maps</a>${link ? ` · <a href="${esc(link)}" target="_blank" rel="noopener">Tipp</a>` : ""}`); });
+  if(!fit) return;
+  const r = SPOT_REGIONS.find(x => x.k === spotRegion);
+  if(r) spotMap.setView([r.lat, r.lon], r.z);
+  else if(list.length) spotMap.fitBounds(L.latLngBounds(list.map(s => [s.lat, s.lon])).pad(0.3), { maxZoom: 13 });
+  else spotMap.setView([-45, -66], 4);
+}
+function setPick(lat, lon, name){
+  spotPick = { lat, lon };
+  if(name && !$("#spName").value) $("#spName").value = name;
+  if(spotMap){ if(spotPickMarker) spotPickMarker.remove(); spotPickMarker = L.marker([lat, lon]).addTo(spotMap); spotMap.setView([lat, lon], Math.max(spotMap.getZoom(), 14)); }
+}
+async function searchPlaces(q){
+  const box = $("#spResults"); if(!box) return;
+  if(q.trim().length < 3){ box.innerHTML = ""; return; }
+  if(navigator.onLine === false){ box.innerHTML = '<p class="small muted">Ohne Netz keine Suche. Ort später ergänzen oder auf die Karte tippen.</p>'; return; }
+  const r = SPOT_REGIONS.find(x => x.k === spotRegion) || { lat: -45, lon: -66 };
+  try{
+    const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=6&lang=de&lat=${r.lat}&lon=${r.lon}`);
+    const j = await res.json();
+    const feats = (j.features || []).filter(f => f.geometry && f.geometry.coordinates);
+    box.innerHTML = feats.length ? feats.map((f,i) => { const p = f.properties || {}; const sub = [p.street, p.city || p.county, p.country].filter(Boolean).join(", ");
+      return `<button type="button" class="spres" data-i="${i}"><b>${esc(p.name || sub || "Ort")}</b><span class="small muted">${esc(sub)}</span></button>`; }).join("") : '<p class="small muted">Nichts gefunden. Anders schreiben oder auf die Karte tippen.</p>';
+    box.querySelectorAll(".spres").forEach(b => b.addEventListener("click", () => { const f = feats[+b.dataset.i]; const [lon, lat] = f.geometry.coordinates; setPick(lat, lon, (f.properties||{}).name || ""); box.innerHTML = `<p class="small" style="color:var(--ok)">✓ ${esc((f.properties||{}).name || "Ort")} gewählt</p>`; }));
+  }catch(e){ box.innerHTML = '<p class="small muted">Suche gerade nicht erreichbar. Auf die Karte tippen geht trotzdem.</p>'; }
+}
+function bindSpots(v){
+  v.querySelectorAll("[data-sr]").forEach(b => b.addEventListener("click", () => { spotRegion = b.dataset.sr; v.querySelectorAll("[data-sr]").forEach(x => x.setAttribute("aria-pressed", x === b)); $("#spotList").innerHTML = spotListHtml(); bindSpotList(v); drawSpots(true); }));
+  const q = $("#spQuery"); if(q) q.addEventListener("input", () => { clearTimeout(spotSearchTimer); spotSearchTimer = setTimeout(() => searchPlaces(q.value), 450); });
+  const cap = $("#spCap"); if(cap) cap.addEventListener("input", () => {
+    const m = cap.value.match(/📍\s*([^\n#@|•]+)/) || cap.value.match(/(?:Ort|Location|Ubicación|Dirección)\s*[:\-]\s*([^\n#@|]+)/i);
+    if(m){ const place = m[1].trim().replace(/[.,;!]+$/, ""); q.value = place; if(!$("#spName").value) $("#spName").value = place.split(",")[0].slice(0,80); searchPlaces(place); }
+  });
+  const f = $("#spotForm"); if(f) f.addEventListener("submit", async e => { e.preventDefault();
+    const name = $("#spName").value.trim(); const link = $("#spLink").value.trim();
+    if(!spotPick){ $("#spMsg").textContent = "Bitte einen Vorschlag wählen oder auf die Karte tippen."; return; }
+    if(link && !/^https:\/\//i.test(link)){ $("#spMsg").textContent = "Der Link muss mit https:// beginnen."; return; }
+    const ok = await safeWrite(() => state.db.collection("spots").add({ name, lat: +spotPick.lat.toFixed(6), lon: +spotPick.lon.toFixed(6), link: link.slice(0,500), cat: $("#spCat").value, note: $("#spNote").value.trim().slice(0,200), region: nearestRegion(spotPick.lat, spotPick.lon), at: Date.now() }));
+    if(ok){ f.reset(); spotPick = null; if(spotPickMarker){ spotPickMarker.remove(); spotPickMarker = null; } $("#spResults").innerHTML = ""; $("#spMsg").textContent = "Gemerkt."; }
+  });
+  bindSpotList(v);
+}
+function bindSpotList(v){
+  v.querySelectorAll("[data-spdel]").forEach(b => b.addEventListener("click", async () => { if(b.dataset.armed !== "1"){ b.dataset.armed = "1"; b.textContent = "wirklich?"; return; } await safeWrite(() => state.db.doc("spots/" + b.dataset.spdel).delete()); }));
+  v.querySelectorAll("[data-spfly]").forEach(b => b.addEventListener("click", () => { const s = (state.spots||[]).find(x => x.id === b.dataset.spfly); if(s && spotMap){ spotMap.setView([s.lat, s.lon], 15); $("#spotMap").scrollIntoView({ behavior: "smooth", block: "center" }); } }));
+}
+
+function renderOrte(){
+  const v = $("#v-orte");
+  if(!v.dataset.built){
+    v.innerHTML = `<div class="sechead"><h2>Orte & Tipps</h2></div>${spotsHtml()}<div id="guideArea" style="display:grid;gap:14px"></div>`;
+    v.dataset.built = "1"; bindSpots(v); initSpotMap();
+  } else {
+    const cnt = v.querySelector("#spotCard .sechead .small"); if(cnt) cnt.textContent = `${(state.spots||[]).length} Tipps`;
+    $("#spotList").innerHTML = spotListHtml(); bindSpotList(v); drawSpots(false);
+    if(spotMap) setTimeout(() => spotMap.invalidateSize(), 50);
+  }
+  renderGuides();
 }
 
 /* ============ ORGA ============ */
@@ -625,7 +741,7 @@ function route(){
 function renderCurrent(){
   const active = document.activeElement;
   // Nicht neu zeichnen, während jemand in ein Notizfeld schreibt
-  if(active && active.matches && active.matches("textarea[data-note], .addrow input, .addrow select, .costform input, .costform select, .fxin")) return;
+  if(active && active.matches && active.matches("textarea[data-note], .addrow input, .addrow select, .costform input, .costform select, .fxin, #spotForm input, #spotForm textarea, #spotForm select")) return;
   ({heute:renderHeute,plan:renderPlan,buchungen:renderBuchungen,trek:renderTrek,orte:renderOrte,posten:()=>{},kosten:renderKosten,orga:renderOrga,claude:renderClaude})[current]();
 }
 function renderAll(){ renderCount(); renderCurrent(); }
@@ -652,6 +768,7 @@ function rowsToState(){
   state.costs = list("kosten").sort((a,b) => (b.date||"").localeCompare(a.date||"") || (b.at||0)-(a.at||0));
   state.beers = list("bier").sort((a,b) => (b.at||0)-(a.at||0));
   state.rates = c("settings").rates || {};
+  state.spots = list("spots");
   state.wishes = list("wishes").sort((a,b) => (a.done - b.done) || (b.at||0)-(a.at||0));
 }
 function localApply(op){
