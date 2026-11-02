@@ -418,6 +418,53 @@ function costSummary(){
   return {paidV,paidF,shareV,shareF,total,missing,byCat,net:paidV-shareV};
 }
 let costPrefill = null;
+/* Umrechner: eigener Tauschkurs oder offizieller Referenzkurs (offline zwischengespeichert) */
+let fxRef = null, fxCur = "ARS", fxAmt = "10000", fxMode = null;
+async function loadFx(){
+  if(!fxRef) fxRef = ls.get("fx-ref");
+  if(navigator.onLine === false || (fxRef && Date.now() - fxRef.at < 6*3600e3)) return;
+  try{
+    const r = await fetch("https://open.er-api.com/v6/latest/EUR"); const j = await r.json();
+    if(j && j.result === "success" && j.rates){ fxRef = { at: Date.now(), rates: { ARS: j.rates.ARS, CLP: j.rates.CLP, USD: j.rates.USD } }; ls.set("fx-ref", fxRef); if(current === "kosten") queueRender(); }
+  }catch(e){}
+}
+function fxRate(cur){
+  const own = Number(state.rates[cur]), ref = fxRef && fxRef.rates && Number(fxRef.rates[cur]);
+  const mode = fxMode || (own > 0 ? "own" : "ref");
+  if(mode === "own" && own > 0) return { r: own, src: "euer Tauschkurs" };
+  if(ref > 0) return { r: ref, src: "offizieller Kurs vom " + new Date(fxRef.at).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"}) };
+  if(own > 0) return { r: own, src: "euer Tauschkurs" };
+  return null;
+}
+const fmtNum = (n, d) => n.toLocaleString("de-DE", { maximumFractionDigits: d, minimumFractionDigits: d });
+function fxUpdate(){
+  const out = $("#fxOut"), note = $("#fxNote"); if(!out) return;
+  const amt = parseFloat(String($("#fxAmt").value).replace(/\./g,"").replace(",", ".")); const R = fxRate(fxCur);
+  if(!R){ out.textContent = "–"; note.textContent = "Noch kein Kurs: unten unter Wechselkurse euren Tauschkurs eintragen oder einmal mit Netz öffnen."; return; }
+  out.textContent = isFinite(amt) ? fmtNum(amt / R.r, 2) + " €" : "–";
+  note.textContent = `1 € = ${fmtNum(R.r, R.r < 10 ? 3 : 0)} ${fxCur} · ${R.src}` + (fxCur === "ARS" ? " · Wechselstuben und Kartenkurs können leicht abweichen" : "");
+  const back = $("#fxBack"); if(back) back.innerHTML = [10, 50, 100].map(e => `<span class="chip grey">${e} € = ${fmtNum(e * R.r, 0)} ${esc(fxCur)}</span>`).join("");
+}
+function converterHtml(){
+  const own = Number(state.rates[fxCur]) > 0, ref = fxRef && fxRef.rates && fxRef.rates[fxCur];
+  return `<div class="card hl"><div class="sechead"><h3>Umrechner</h3>${own && ref ? `<div class="seg" role="group" aria-label="Kurs"><button type="button" data-fxm="own" aria-pressed="${(fxMode||"own") === "own"}">Unser Kurs</button><button type="button" data-fxm="ref" aria-pressed="${fxMode === "ref"}">Offiziell</button></div>` : ""}</div>
+    <div class="conv">
+      <input id="fxAmt" class="fxin" inputmode="decimal" autocomplete="off" value="${esc(fxAmt)}" aria-label="Betrag">
+      <select id="fxSel" aria-label="Währung">${["ARS","CLP","USD"].map(k => `<option ${k === fxCur ? "selected" : ""}>${k}</option>`).join("")}</select>
+      <span class="fxeq">=</span><b id="fxOut" class="fxout money">–</b>
+    </div>
+    <div class="quick" style="margin-top:8px">${(fxCur === "ARS" ? [1000, 5000, 20000, 100000] : fxCur === "CLP" ? [1000, 10000, 50000] : [10, 50, 100]).map(n => `<button type="button" data-fxa="${n}">${fmtNum(n,0)}</button>`).join("")}</div>
+    <div id="fxBack" class="chips" style="margin-top:8px"></div>
+    <p class="small muted" id="fxNote" style="margin:6px 0 0"></p></div>`;
+}
+function bindConverter(v){
+  const a = v.querySelector("#fxAmt"); if(!a) return;
+  a.addEventListener("input", () => { fxAmt = a.value; fxUpdate(); });
+  v.querySelector("#fxSel").addEventListener("change", e => { fxCur = e.target.value; renderKosten(); });
+  v.querySelectorAll("[data-fxa]").forEach(b => b.addEventListener("click", () => { fxAmt = String(b.dataset.fxa); a.value = fmtNum(+b.dataset.fxa, 0); fxUpdate(); }));
+  v.querySelectorAll("[data-fxm]").forEach(b => b.addEventListener("click", () => { fxMode = b.dataset.fxm; renderKosten(); }));
+  fxUpdate();
+}
 function renderKosten(){
   const v = $("#v-kosten"); const S = costSummary(); const f = costPrefill || {};
   const settle = Math.abs(S.net) < 0.5 ? `<b>Quitt</b><span class="muted">Niemand schuldet niemandem etwas</span>`
@@ -426,6 +473,7 @@ function renderKosten(){
   const maxCat = Math.max(1, ...Object.values(S.byCat));
   const fmtAmt = c => `${c.amount.toLocaleString("de-DE",{maximumFractionDigits:2})} ${c.cur}`;
   v.innerHTML = `<div class="sechead"><h2>Kosten &amp; Abrechnung</h2><span class="small muted">Alles in Euro umgerechnet</span></div>
+  ${converterHtml()}
   <div class="card hl settle">${settle}${S.missing ? `<span class="chip warn" style="justify-self:center">${S.missing} Ausgabe(n) ohne Wechselkurs, unten Kurs eintragen</span>` : ""}</div>
   <div class="stats">
     <div class="stat"><b class="money">${eur(S.total)}</b><span>Gesamt</span></div>
@@ -456,6 +504,7 @@ function renderKosten(){
       <form class="costform" id="rateForm">${["ARS","CLP","USD"].map(c => `<label>1 € = … ${c}<input type="number" step="any" min="0" id="r-${c}" value="${esc(state.rates[c] ?? "")}" ${state.canWrite ? "" : "readonly"}></label>`).join("")}
       ${state.canWrite ? `<div class="wide"><button class="btn ghost" type="submit">Kurse speichern</button></div>` : ""}</form></div>
   </div>`;
+  bindConverter(v); loadFx();
   v.querySelectorAll("[data-quick]").forEach(b => b.addEventListener("click", () => { costPrefill = QUICK[+b.dataset.quick]; renderKosten(); $("#cAmt").focus(); }));
   const cf = v.querySelector("#costForm");
   if(cf) cf.addEventListener("submit", async e => { e.preventDefault();
@@ -576,7 +625,7 @@ function route(){
 function renderCurrent(){
   const active = document.activeElement;
   // Nicht neu zeichnen, während jemand in ein Notizfeld schreibt
-  if(active && active.matches && active.matches("textarea[data-note], .addrow input, .addrow select, .costform input, .costform select")) return;
+  if(active && active.matches && active.matches("textarea[data-note], .addrow input, .addrow select, .costform input, .costform select, .fxin")) return;
   ({heute:renderHeute,plan:renderPlan,buchungen:renderBuchungen,trek:renderTrek,orte:renderOrte,posten:()=>{},kosten:renderKosten,orga:renderOrga,claude:renderClaude})[current]();
 }
 function renderAll(){ renderCount(); renderCurrent(); }
