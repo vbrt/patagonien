@@ -537,11 +537,11 @@ let costPrefill = null;
 /* Umrechner: eigener Tauschkurs oder offizieller Referenzkurs (offline zwischengespeichert) */
 let fxRef = null, fxCur = "ARS", fxAmt = "10000", fxMode = null;
 async function loadFx(){
-  if(!fxRef) fxRef = ls.get("fx-ref");
+  if(!fxRef) fxRef = ls.get("pat:fx-ref");
   if(navigator.onLine === false || (fxRef && Date.now() - fxRef.at < 6*3600e3)) return;
   try{
     const r = await fetch("https://open.er-api.com/v6/latest/EUR"); const j = await r.json();
-    if(j && j.result === "success" && j.rates){ fxRef = { at: Date.now(), rates: { ARS: j.rates.ARS, CLP: j.rates.CLP, USD: j.rates.USD } }; ls.set("fx-ref", fxRef); if(current === "kosten") queueRender(); }
+    if(j && j.result === "success" && j.rates){ fxRef = { at: Date.now(), rates: { ARS: j.rates.ARS, CLP: j.rates.CLP, USD: j.rates.USD } }; ls.set("pat:fx-ref", fxRef); if(current === "kosten") queueRender(); }
   }catch(e){}
 }
 function fxRate(cur){
@@ -748,7 +748,7 @@ function renderAll(){ renderCount(); renderCurrent(); }
 window.addEventListener("hashchange", () => { route(); window.scrollTo(0,0); });
 
 /* ============ START: Supabase-Anbindung (offline-fähig) ============ */
-const CACHE_KEY = "cockpit-cache-v1", OPS_KEY = "cockpit-ops-v1";
+const CACHE_KEY = "pat:cockpit-cache-v1", OPS_KEY = "pat:cockpit-ops-v1";
 const ls = { get(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } }, set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }, del(k){ try{ localStorage.removeItem(k); }catch(e){} } };
 const SBC = window.SB;
 let ROWS = {};      // coll -> id -> data
@@ -841,8 +841,8 @@ async function loadWeatherOM(){
     const r = await fetch(url); const j = await r.json(); const arr = Array.isArray(j) ? j : [j];
     const TXT = {0:"Klar",1:"Überwiegend klar",2:"Teils bewölkt",3:"Bedeckt",45:"Nebel",48:"Nebel",51:"Niesel",53:"Niesel",55:"Niesel",61:"Leichter Regen",63:"Regen",65:"Starker Regen",71:"Leichter Schnee",73:"Schnee",75:"Starker Schnee",80:"Schauer",81:"Schauer",82:"Heftige Schauer",85:"Schneeschauer",86:"Schneeschauer",95:"Gewitter",96:"Gewitter",99:"Gewitter"};
     state.wx = { updated: new Date().toISOString(), places: arr.map((x,i) => ({ key: L[i].key, name: L[i].name, days: (x.daily.time||[]).map((d,k) => ({ date: d, hi: Math.round(x.daily.temperature_2m_max[k]), lo: Math.round(x.daily.temperature_2m_min[k]), text: [TXT[x.daily.weather_code[k]] || "", x.daily.precipitation_probability_max[k] ? x.daily.precipitation_probability_max[k] + "% Regen" : ""].filter(Boolean).join(", "), wind: "Böen " + Math.round(x.daily.wind_gusts_10m_max[k]) + " km/h" })) })) };
-    ls.set("cockpit-wx", state.wx); queueRender();
-  }catch(e){ state.wx = ls.get("cockpit-wx"); }
+    ls.set("pat:cockpit-wx", state.wx); queueRender();
+  }catch(e){ state.wx = ls.get("pat:cockpit-wx"); }
 }
 function showGate(msg, email){
   document.querySelector("nav.tabs").hidden = true;
@@ -871,7 +871,7 @@ function queueRender(){ if(renderQueued) return; renderQueued = true; requestAni
   state.me = (session.user.email || "").toLowerCase();
   state.db = dbAdapter; state.assets = assetsAdapter; state.canWrite = true;
   if(cache){ ROWS = cache; OPS.forEach(localApply); rowsToState(); }
-  state.wx = ls.get("cockpit-wx");
+  state.wx = ls.get("pat:cockpit-wx");
   renderCount(); route(); updateSync();
   if(navigator.onLine !== false){
     const { data: ok } = await SBC.rpc("is_editor");

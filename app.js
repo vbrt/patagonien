@@ -17,7 +17,10 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 const d0 = () => { const n = new Date(); return n.getFullYear()+"-"+String(n.getMonth()+1).padStart(2,"0")+"-"+String(n.getDate()).padStart(2,"0"); };
 const fmtDate = ts => { const d = new Date(ts); return d.toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"long"}) + ", " + d.toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}) + " Uhr"; };
 const mediaUrl = path => DEMO ? path : sb.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
-const store = { get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }, set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} } };
+const NS = "pat:";
+// alte Schlüssel ohne Namensraum einmalig übernehmen
+try{ Object.keys(localStorage).filter(k => /^(rx:|cname$|saver$)/.test(k)).forEach(k => { if(localStorage.getItem(NS + k) == null) localStorage.setItem(NS + k, localStorage.getItem(k)); }); }catch(e){}
+const store = { get(k){ try{ return localStorage.getItem(NS + k); }catch(e){ return null; } }, set(k,v){ try{ localStorage.setItem(NS + k,v); }catch(e){} } };
 function stopIndex(){ const t = d0(); if(t < STOPS[0].from) return -1; return STOPS.findIndex(s => t >= s.from && t <= s.to); }
 
 /* ---------- Laden ---------- */
@@ -35,7 +38,7 @@ async function loadAll(){
   S.loading = false;
 }
 async function checkEditor(){
-  if(DEMO){ S.editor = new URLSearchParams(location.search).has("editor"); return; }
+  if(DEMO){ S.editor = new URLSearchParams(location.search).has("editor"); if(sb){ try{ S.session = (await sb.auth.getSession()).data.session; }catch(e){} } return; }
   const { data } = await sb.auth.getSession(); S.session = data.session;
   if(!S.session){ S.editor = false; return; }
   const { data: ok } = await sb.rpc("is_editor"); S.editor = !!ok;
@@ -133,6 +136,12 @@ function postHtml(p){
     </div>
   </article>`;
 }
+function defaultAuthor(){
+  const mail = (S.session && S.session.user && S.session.user.email || "").toLowerCase();
+  if(/felix/.test(mail)) return "felix";
+  if(mail) return "victor";
+  return store.get("author") || "victor";
+}
 function studioHtml(){
   const saver = store.get("saver") !== "0";
   return `<section class="card studio" aria-labelledby="h-studio"><h2 id="h-studio">Neuer Post</h2>
@@ -140,7 +149,7 @@ function studioHtml(){
     <div id="outbox"></div>
     <form id="postForm">
       <div class="row2">
-        <label>Wer postet?<select id="pAuthor"><option value="victor">Victor</option><option value="felix" ${store.get("author") === "felix" ? "selected" : ""}>Felix</option></select></label>
+        <label>Wer postet?<select id="pAuthor"><option value="victor" ${defaultAuthor() === "victor" ? "selected" : ""}>Victor</option><option value="felix" ${defaultAuthor() === "felix" ? "selected" : ""}>Felix</option></select></label>
         <label>Wo?<select id="pPlace">${PLACES.map(p => `<option ${p === store.get("place") ? "selected" : ""}>${esc(p)}</option>`).join("")}</select></label>
       </div>
       <div class="quick pingrow"><span class="small muted">Nur kurzes Lebenszeichen (wenige Bytes):</span>
