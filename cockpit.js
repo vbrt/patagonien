@@ -316,7 +316,37 @@ function renderGuides(){
 }
 
 /* ============ GEMERKTE ORTE (Tipps aus Instagram & Co.) ============ */
-const SPOT_CATS = { essen: ["Essen", "#d26a12"], bar: ["Café & Bar", "#8e44ad"], aussicht: ["Aussicht", "#0d6f7b"], wandern: ["Wandern", "#2f7a45"], erlebnis: ["Erlebnis", "#c0392b"], sonst: ["Sonstiges", "#5d6b74"] };
+const TCATS = (typeof TIP_CATS !== "undefined") ? TIP_CATS : { food: ["Food & Drinks", "#d26a12"], nacht: ["Abends", "#8e44ad"], aktiv: ["Aktivitäten", "#2f7a45"], shop: ["Shopping", "#0d6f7b"] };
+const CAT_ALIAS = { essen: "food", bar: "food", aussicht: "aktiv", wandern: "aktiv", erlebnis: "aktiv", sonst: "aktiv" };
+function catOf(x){ return TCATS[x.c || x.cat] ? (x.c || x.cat) : (CAT_ALIAS[x.cat] || "aktiv"); }
+const CURATED = (typeof TIPS !== "undefined" ? TIPS : []).map((t, i) => ({ ...t, id: "tip" + i, cur: true, region: t.r, name: t.n, note: t.t }));
+let tipCat = "alle";
+/* Koordinaten für kuratierte Tipps: einmal online über Photon suchen, dann im Browser merken */
+const GEO_KEY = "pat:geo-v1";
+let geoCache = (() => { try{ return JSON.parse(localStorage.getItem(GEO_KEY)) || {}; }catch(e){ return {}; } })();
+function tipPos(t){ const g = geoCache[t.q]; return Array.isArray(g) ? g : null; }
+let geoRunning = false;
+async function geocodeTips(){
+  if(geoRunning || navigator.onLine === false) return; geoRunning = true;
+  try{
+    for(const t of CURATED){
+      if(geoCache[t.q] !== undefined) continue;
+      const r = SPOT_REGIONS.find(x => x.k === t.region) || { lat: -45, lon: -66 };
+      try{
+        const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(t.q)}&limit=1&lat=${r.lat}&lon=${r.lon}`);
+        if(!res.ok) break;
+        const f = ((await res.json()).features || [])[0];
+        const [lon, lat] = f && f.geometry ? f.geometry.coordinates : [null, null];
+        const near = lat != null && Math.abs(lat - r.lat) < (t.region === "tdp" ? 0.8 : 0.35) && Math.abs(lon - r.lon) < (t.region === "tdp" ? 0.8 : 0.45);
+        geoCache[t.q] = near ? [+lat.toFixed(6), +lon.toFixed(6)] : 0;
+        try{ localStorage.setItem(GEO_KEY, JSON.stringify(geoCache)); }catch(e){}
+        drawSpots(false);
+      }catch(e){ break; }
+      await new Promise(ok => setTimeout(ok, 700));
+    }
+  } finally { geoRunning = false; }
+}
+function tipMaps(t){ return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(t.name + ", " + t.q); }
 const SPOT_REGIONS = [
   { k: "ba", n: "Buenos Aires", lat: -34.60, lon: -58.40, z: 12 },
   { k: "ush", n: "Ushuaia", lat: -54.80, lon: -68.30, z: 12 },
@@ -329,9 +359,10 @@ function gmaps(s){ return "https://www.google.com/maps/search/?api=1&query=" + e
 function safeLink(u){ return /^https:\/\//i.test(u || "") ? u : ""; }
 function spotsHtml(){
   return `<div class="card" id="spotCard">
-    <div class="sechead"><h3>Gemerkte Orte</h3><span class="small muted">${(state.spots||[]).length} Tipps</span></div>
+    <div class="sechead"><h3>Unsere Tipps & eure Fundstücke</h3><span class="small muted" id="spotCount"></span></div>
     <div class="placetabs" id="spotRegions" role="group" aria-label="Gegend">${[["alle","Alle"], ...SPOT_REGIONS.map(r => [r.k, r.n])].map(([k,n]) => `<button type="button" data-sr="${k}" aria-pressed="${k === spotRegion}">${esc(n)}</button>`).join("")}</div>
-    <div id="spotMap" class="spotmap" role="application" aria-label="Karte mit gemerkten Orten"></div>
+    <div class="placetabs" id="spotCats" role="group" aria-label="Kategorie">${[["alle","Alles"], ...Object.entries(TCATS).map(([k,[n]]) => [k, n])].map(([k,n]) => `<button type="button" data-sc="${k}" aria-pressed="${k === tipCat}">${esc(n)}</button>`).join("")}</div>
+    <div id="spotMap" class="spotmap" role="application" aria-label="Karte mit Tipps"></div>
     <p class="small muted" style="margin:4px 0 0">Karte braucht Netz. Ohne Netz bleibt die Liste unten nutzbar. Kartendaten © OpenStreetMap.</p>
     ${state.canWrite ? `<details class="more" id="spotAdd" style="margin-top:10px"><summary>+ Tipp hinzufügen</summary>
       <form class="spotform" id="spotForm">
@@ -341,20 +372,49 @@ function spotsHtml(){
         <div id="spResults" class="spresults"></div>
         <p class="small muted" style="margin:0">Nichts gefunden? Einfach auf die Karte tippen, um die Markierung selbst zu setzen.</p>
         <div class="row2"><label>Name<input id="spName" maxlength="80" required placeholder="Name des Ortes"></label>
-          <label>Art<select id="spCat">${Object.entries(SPOT_CATS).map(([k,[n]]) => `<option value="${k}">${esc(n)}</option>`).join("")}</select></label></div>
+          <label>Art<select id="spCat">${Object.entries(TCATS).map(([k,[n]]) => `<option value="${k}">${esc(n)}</option>`).join("")}</select></label></div>
         <label>Notiz<input id="spNote" maxlength="200" placeholder="z. B. Empanadas probieren, reservieren"></label>
         <div><button class="btn" type="submit" id="spSave">Merken</button> <span class="small muted" id="spMsg"></span></div>
       </form></details>` : ""}
     <div id="spotList" style="margin-top:10px"></div>
   </div>`;
 }
+function spotItems(){
+  const inReg = x => spotRegion === "alle" || x.region === spotRegion;
+  const inCat = x => tipCat === "alle" || catOf(x) === tipCat;
+  return { tips: CURATED.filter(x => inReg(x) && inCat(x)), mine: (state.spots||[]).filter(x => inReg(x) && inCat(x)).sort((a,b) => (b.at||0) - (a.at||0)) };
+}
+function tipHtml(t){
+  const [cn, col] = TCATS[catOf(t)];
+  const reg = spotRegion === "alle" ? (SPOT_REGIONS.find(r => r.k === t.region)||{}).n : "";
+  return `<div class="spot"><span class="dot" style="background:${col}"></span><div><b>${esc(t.name)}</b>${t.top ? ' <span class="tag ok">Top</span>' : ""} <span class="small muted">· ${esc(t.s || cn)}${reg ? " · " + esc(reg) : ""}</span>
+    <div class="small">${esc(t.note)}</div>
+    ${t.w ? `<div class="small muted">Passt zu: ${esc(t.w)}</div>` : ""}
+    <div class="small"><a href="${esc(tipMaps(t))}" target="_blank" rel="noopener">In Google Maps</a>${tipPos(t) ? ` · <button type="button" class="copy" data-tipfly="${esc(t.id)}">auf Karte</button>` : ""}</div></div></div>`;
+}
+function mineHtml(s){
+  const [cn, col] = TCATS[catOf(s)]; const link = safeLink(s.link);
+  return `<div class="spot"><span class="dot mine" style="background:${col}"></span><div><b>${esc(s.name)}</b> <span class="tag">von euch</span> <span class="small muted">· ${esc(cn)}${s.region && spotRegion === "alle" ? " · " + esc((SPOT_REGIONS.find(r => r.k === s.region)||{}).n || "") : ""}</span>
+    ${s.note ? `<div class="small">${esc(s.note)}</div>` : ""}
+    <div class="small"><a href="${esc(gmaps(s))}" target="_blank" rel="noopener">In Google Maps</a>${link ? ` · <a href="${esc(link)}" target="_blank" rel="noopener">Tipp öffnen</a>` : ""} · <button type="button" class="copy" data-spfly="${esc(s.id)}">auf Karte</button>${state.canWrite ? ` · <button type="button" class="copy" data-spdel="${esc(s.id)}">löschen</button>` : ""}</div></div></div>`;
+}
 function spotListHtml(){
-  const list = (state.spots||[]).filter(s => spotRegion === "alle" || s.region === spotRegion).sort((a,b) => (b.at||0) - (a.at||0));
-  if(!list.length) return '<p class="muted small">Noch keine Tipps in dieser Gegend.</p>';
-  return list.map(s => { const [cn, col] = SPOT_CATS[s.cat] || SPOT_CATS.sonst; const link = safeLink(s.link);
-    return `<div class="spot"><span class="dot" style="background:${col}"></span><div><b>${esc(s.name)}</b> <span class="small muted">· ${esc(cn)}${s.region ? " · " + esc((SPOT_REGIONS.find(r => r.k === s.region)||{}).n || "") : ""}</span>
-      ${s.note ? `<div class="small">${esc(s.note)}</div>` : ""}
-      <div class="small"><a href="${esc(gmaps(s))}" target="_blank" rel="noopener">In Google Maps</a>${link ? ` · <a href="${esc(link)}" target="_blank" rel="noopener">Tipp öffnen</a>` : ""} · <button type="button" class="copy" data-spfly="${esc(s.id)}">auf Karte</button>${state.canWrite ? ` · <button type="button" class="copy" data-spdel="${esc(s.id)}">löschen</button>` : ""}</div></div></div>`; }).join("");
+  const { tips, mine } = spotItems();
+  const cnt = $("#spotCount"); if(cnt) cnt.textContent = `${tips.length + mine.length} Orte`;
+  if(!tips.length && !mine.length) return '<p class="muted small">Hier noch nichts. Unten über „+ Tipp hinzufügen“ ergänzen.</p>';
+  const cats = tipCat === "alle" ? Object.keys(TCATS) : [tipCat];
+  let out = "";
+  if(mine.length) out += `<h4 class="spothead">Eure Fundstücke</h4>` + mine.map(mineHtml).join("");
+  cats.forEach(k => {
+    const list = tips.filter(t => catOf(t) === k);
+    if(!list.length) return;
+    const subs = [...new Set(list.map(t => t.s))];
+    out += `<h4 class="spothead" style="color:${TCATS[k][1]}">${esc(TCATS[k][0])}</h4>` + subs.map(sb => {
+      const items = list.filter(t => t.s === sb).sort((a,b) => (b.top?1:0) - (a.top?1:0));
+      return (subs.length > 1 ? `<div class="small muted spotsub">${esc(sb)}</div>` : "") + items.map(tipHtml).join("");
+    }).join("");
+  });
+  return out;
 }
 function initSpotMap(){
   const el = $("#spotMap"); if(!el || !window.L) return;
@@ -368,14 +428,16 @@ function initSpotMap(){
 function drawSpots(fit){
   if(!spotMap || !spotLayer) return;
   spotLayer.clearLayers();
-  const list = (state.spots||[]).filter(s => spotRegion === "alle" || s.region === spotRegion);
-  list.forEach(s => { const col = (SPOT_CATS[s.cat] || SPOT_CATS.sonst)[1]; const link = safeLink(s.link);
-    L.circleMarker([s.lat, s.lon], { radius: 9, color: "#fff", weight: 2, fillColor: col, fillOpacity: .95 }).addTo(spotLayer)
-      .bindPopup(`<b>${esc(s.name)}</b>${s.note ? "<br>" + esc(s.note) : ""}<br><a href="${esc(gmaps(s))}" target="_blank" rel="noopener">Google Maps</a>${link ? ` · <a href="${esc(link)}" target="_blank" rel="noopener">Tipp</a>` : ""}`); });
+  const { tips, mine } = spotItems(); const pts = [];
+  tips.forEach(t => { const p = tipPos(t); if(!p) return; pts.push(p);
+    L.circleMarker(p, { radius: t.top ? 8 : 6, color: "#fff", weight: 2, fillColor: TCATS[catOf(t)][1], fillOpacity: .9 }).addTo(spotLayer)
+      .bindPopup(`<b>${esc(t.name)}</b><br>${esc(t.s)}${t.w ? " · " + esc(t.w) : ""}<br><a href="${esc(tipMaps(t))}" target="_blank" rel="noopener">Google Maps</a>`); });
+  mine.forEach(s => { const link = safeLink(s.link); pts.push([s.lat, s.lon]);
+    L.circleMarker([s.lat, s.lon], { radius: 9, color: "#1d2a33", weight: 3, fillColor: TCATS[catOf(s)][1], fillOpacity: .95 }).addTo(spotLayer)
+      .bindPopup(`<b>${esc(s.name)}</b> (von euch)${s.note ? "<br>" + esc(s.note) : ""}<br><a href="${esc(gmaps(s))}" target="_blank" rel="noopener">Google Maps</a>${link ? ` · <a href="${esc(link)}" target="_blank" rel="noopener">Tipp</a>` : ""}`); });
   if(!fit) return;
   const r = SPOT_REGIONS.find(x => x.k === spotRegion);
   if(r) spotMap.setView([r.lat, r.lon], r.z);
-  else if(list.length) spotMap.fitBounds(L.latLngBounds(list.map(s => [s.lat, s.lon])).pad(0.3), { maxZoom: 13 });
   else spotMap.setView([-45, -66], 4);
 }
 function setPick(lat, lon, name){
@@ -399,6 +461,7 @@ async function searchPlaces(q){
 }
 function bindSpots(v){
   v.querySelectorAll("[data-sr]").forEach(b => b.addEventListener("click", () => { spotRegion = b.dataset.sr; v.querySelectorAll("[data-sr]").forEach(x => x.setAttribute("aria-pressed", x === b)); $("#spotList").innerHTML = spotListHtml(); bindSpotList(v); drawSpots(true); }));
+  v.querySelectorAll("[data-sc]").forEach(b => b.addEventListener("click", () => { tipCat = b.dataset.sc; v.querySelectorAll("[data-sc]").forEach(x => x.setAttribute("aria-pressed", x === b)); $("#spotList").innerHTML = spotListHtml(); bindSpotList(v); drawSpots(false); }));
   const q = $("#spQuery"); if(q) q.addEventListener("input", () => { clearTimeout(spotSearchTimer); spotSearchTimer = setTimeout(() => searchPlaces(q.value), 450); });
   const cap = $("#spCap"); if(cap) cap.addEventListener("input", () => {
     const m = cap.value.match(/📍\s*([^\n#@|•]+)/) || cap.value.match(/(?:Ort|Location|Ubicación|Dirección)\s*[:\-]\s*([^\n#@|]+)/i);
@@ -415,6 +478,7 @@ function bindSpots(v){
 }
 function bindSpotList(v){
   v.querySelectorAll("[data-spdel]").forEach(b => b.addEventListener("click", async () => { if(b.dataset.armed !== "1"){ b.dataset.armed = "1"; b.textContent = "wirklich?"; return; } await safeWrite(() => state.db.doc("spots/" + b.dataset.spdel).delete()); }));
+  v.querySelectorAll("[data-tipfly]").forEach(b => b.addEventListener("click", () => { const t = CURATED.find(x => x.id === b.dataset.tipfly); const p = t && tipPos(t); if(p && spotMap){ spotMap.setView(p, 15); $("#spotMap").scrollIntoView({ behavior: "smooth", block: "center" }); } }));
   v.querySelectorAll("[data-spfly]").forEach(b => b.addEventListener("click", () => { const s = (state.spots||[]).find(x => x.id === b.dataset.spfly); if(s && spotMap){ spotMap.setView([s.lat, s.lon], 15); $("#spotMap").scrollIntoView({ behavior: "smooth", block: "center" }); } }));
 }
 
@@ -422,9 +486,8 @@ function renderOrte(){
   const v = $("#v-orte");
   if(!v.dataset.built){
     v.innerHTML = `<div class="sechead"><h2>Orte & Tipps</h2></div>${spotsHtml()}<div id="guideArea" style="display:grid;gap:14px"></div>`;
-    v.dataset.built = "1"; bindSpots(v); initSpotMap();
+    v.dataset.built = "1"; $("#spotList").innerHTML = spotListHtml(); bindSpots(v); initSpotMap(); setTimeout(geocodeTips, 400);
   } else {
-    const cnt = v.querySelector("#spotCard .sechead .small"); if(cnt) cnt.textContent = `${(state.spots||[]).length} Tipps`;
     $("#spotList").innerHTML = spotListHtml(); bindSpotList(v); drawSpots(false);
     if(spotMap) setTimeout(() => spotMap.invalidateSize(), 50);
   }

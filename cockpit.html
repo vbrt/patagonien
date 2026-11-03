@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&amp;family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&amp;family=Source+Sans+3:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@500&amp;display=swap" rel="stylesheet">
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1.9.4">
-<link rel="stylesheet" href="style.css?v=14">
+<link rel="stylesheet" href="style.css?v=15">
 <style>
 :root{
   /* Layout: Kopf mit Countdown, Tab-Leiste wie Wegweiser, darunter je Bereich Karten in einer Spalte (max 860px) */
@@ -86,6 +86,11 @@ nav.tabs{top:0;padding-top:env(safe-area-inset-top)}
 .spot{display:grid;grid-template-columns:14px 1fr;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
 .spot:last-child{border-bottom:0}
 .spot .dot{width:12px;height:12px;border-radius:50%;margin-top:6px}
+.spot .dot.mine{box-shadow:0 0 0 2px var(--ink)}
+.spothead{margin:14px 0 2px;font-size:.95rem;text-transform:uppercase;letter-spacing:.05em}
+.spotsub{margin:8px 0 0;font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:.72rem}
+.tag.ok{background:var(--ok-soft);color:var(--ok)}
+#spotCats{margin-top:8px}
 .leaflet-container{font-family:var(--body)}
 .offline{background:var(--warn-soft);color:var(--warn);font-size:.85rem;padding:6px 12px;text-align:center}
 .mono{font-family:var(--mono);font-size:.9em}
@@ -352,9 +357,10 @@ footer{padding:20px 0 40px;font-size:.8rem;color:var(--muted)}
 <script src="cockpit-flags.js"></script>
 <script src="vendor/supabase.js?v=2.45.4"></script>
 <script src="vendor/leaflet/leaflet.js?v=1.9.4"></script>
-<script src="config.js?v=14"></script>
-<script src="data.js?v=14"></script>
-<script src="app.js?v=14"></script>
-<script src="cockpit.js?v=14"></script>
+<script src="config.js?v=15"></script>
+<script src="data.js?v=15"></script>
+<script src="tipps.js?v=15"></script>
+<script src="app.js?v=15"></script>
+<script src="cockpit.js?v=15"></script>
 </body>
 </html>
