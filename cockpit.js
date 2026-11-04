@@ -264,16 +264,85 @@ function renderTrek(){
   <div class="card">
     <h3>Etappen</h3>
     <div class="stagewrap"><table class="stages"><thead><tr><th>Datum</th><th>Etappe</th><th>Distanz</th><th>Gehzeit</th><th>Nacht</th></tr></thead><tbody>
-    ${TREK.map(s => `<tr class="${s.key ? "key" : ""}"><td class="num">${s.d}</td><td><b>${esc(s.from)} → ${esc(s.to)}</b>${s.note ? `<div class="small muted">${esc(s.note)}</div>` : ""}</td>
+    ${TREK.map((s,i) => `<tr class="${s.key ? "key" : ""}" data-stage="${i}" style="cursor:pointer"><td class="num">${s.d}</td><td><b>${esc(s.from)} → ${esc(s.to)}</b>${s.note ? `<div class="small muted">${esc(s.note)}</div>` : ""}</td>
       <td class="num"><div class="kmbar"><i style="width:${Math.round(s.km/maxKm*70)}px"></i>${String(s.km).replace(".",",")} km</div></td><td class="num">${s.h} Std.</td><td>${esc(s.sleep)} · ${esc(s.op)}</td></tr>`).join("")}
     </tbody></table></div>
+    <p class="small muted" style="margin:6px 0 0">Etappe antippen für Details.</p>
   </div>
+  <div class="card" id="stageCard"></div>
+  ${mapsCardHtml()}
   <div class="grid2">
     <div class="card crit"><h3>Königsetappe 21.11.</h3><p style="margin:0">Von Los Perros über den John-Garner-Pass (1.241 m) nach Grey. Früh los, Ranger geben die Startzeit vor. Bei Sturm wird der Pass gesperrt, dann müsst ihr eventuell eine Nacht länger in Los Perros bleiben: eine Reserveportion Essen einpacken.</p></div>
     <div class="card warn"><h3>Wetter Ende November</h3><p style="margin:0">Frühling: 0–15 °C, Böen am Pass auch deutlich über 80 km/h, Regen, Sonne und Schnee an einem Tag. Fast 17 Stunden Tageslicht, Sonnenaufgang gegen 5:30.</p></div>
     <div class="card"><h3>Regeln im Park</h3><ul class="dots"><li>Parkticket vorher online, QR-Code offline</li><li>Nur auf markierten Wegen gehen</li><li>Kocher nur in den Kochbereichen der Camps, offenes Feuer verboten</li><li>Müll komplett wieder mitnehmen</li><li>Sperrzeiten an Abzweigen (Base Torres, Valle del Francés) beachten</li></ul></div>
     <div class="card"><h3>Was ihr trägt</h3><p style="margin:0">In Refugios mit Betten braucht ihr kein Zelt. In Serón und Los Perros schlaft ihr im Mietzelt: prüfen, ob Schlafsack und Isomatte mitgemietet sind. Ziel: Rucksack unter 12 kg.</p></div>
   </div>`;
+  v.querySelectorAll("[data-stage]").forEach(el => el.addEventListener("click", () => { stageSel = +el.dataset.stage; renderStage(); if(el.tagName === "TR") $("#stageCard").scrollIntoView({ behavior: "smooth", block: "start" }); }));
+  renderStage();
+}
+let stageSel = null, stageMap = null;
+function defaultStage(){
+  const today = new Date().toISOString().slice(0,10);
+  const i = TREK.findIndex(s => { const [d,m] = s.d.split("."); return `2026-${m.padStart(2,"0")}-${d.padStart(2,"0")}` === today; });
+  return i >= 0 ? i : 0;
+}
+function renderStage(){
+  const box = $("#stageCard"); if(!box || !TREK.length) return;
+  if(stageSel == null) stageSel = defaultStage();
+  const s = TREK[stageSel], x = (typeof STAGES !== "undefined" ? STAGES : [])[stageSel] || {};
+  box.innerHTML = `<div class="placetabs" role="group" aria-label="Etappe wählen">${TREK.map((t,i) => `<button type="button" data-st="${i}" aria-pressed="${i === stageSel}">${esc(t.d)}${t.key ? " ▲" : ""}</button>`).join("")}</div>
+    <div class="sechead" style="margin-top:10px"><h3>Tag ${stageSel+1}: ${esc(s.from)} → ${esc(s.to)}</h3></div>
+    <div class="chips" style="margin:0 0 8px"><span class="chip trail">${String(s.km).replace(".",",")} km</span><span class="chip">${esc(s.h)} Std.</span>${x.up ? `<span class="chip">ca. ${esc(x.up)} / ${esc(x.down)}</span>` : ""}${x.lvl ? `<span class="chip">${esc(x.lvl)}</span>` : ""}<span class="chip">Nacht: ${esc(s.sleep)}</span></div>
+    ${x.desc ? `<p style="margin:0 0 10px">${esc(x.desc)}</p>` : ""}
+    <div id="stageMap" class="spotmap" style="height:200px" role="img" aria-label="Karte der Etappe"></div>
+    <p class="small muted" id="stageMapNote" style="margin:4px 0 10px">Start und Ziel als Punkte, die Linie ist nur die Luftlinie. Für den echten Weg die Offline-Karte unten nutzen.</p>
+    <div class="grid2">
+      ${x.hi ? `<div><h3 style="margin:0 0 6px">Highlights</h3><ul class="dots">${x.hi.map(h => `<li>${esc(h)}</li>`).join("")}</ul></div>` : ""}
+      ${x.tips ? `<div><h3 style="margin:0 0 6px">Tipps</h3><ul class="dots">${x.tips.map(h => `<li>${esc(h)}</li>`).join("")}</ul></div>` : ""}
+    </div>
+    ${s.note ? `<p class="small" style="margin:8px 0 0"><b>Hinweis:</b> ${esc(s.note)}</p>` : ""}
+    <div style="margin-top:10px">${noteBox("etappe-" + stageSel, "Eure Notizen zur Etappe: Startzeit, Wasserstellen, was gut war …")}</div>`;
+  box.querySelectorAll("[data-st]").forEach(b => b.addEventListener("click", () => { stageSel = +b.dataset.st; renderStage(); }));
+  bindNotes(box);
+  drawStageMap(x);
+}
+async function geoLookup(q, region){
+  if(geoCache[q] !== undefined) return geoCache[q] || null;
+  if(navigator.onLine === false) return null;
+  const r = SPOT_REGIONS.find(z => z.k === region) || { lat: -51, lon: -73 };
+  try{
+    const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=1&lat=${r.lat}&lon=${r.lon}`);
+    if(!res.ok) return null;
+    const f = ((await res.json()).features || [])[0];
+    const [lon, lat] = f && f.geometry ? f.geometry.coordinates : [null, null];
+    const ok = lat != null && Math.abs(lat - r.lat) < 0.8 && Math.abs(lon - r.lon) < 0.8;
+    geoCache[q] = ok ? [+lat.toFixed(6), +lon.toFixed(6)] : 0;
+    try{ localStorage.setItem(GEO_KEY, JSON.stringify(geoCache)); }catch(e){}
+    return geoCache[q] || null;
+  }catch(e){ return null; }
+}
+async function drawStageMap(x){
+  const el = $("#stageMap"); if(!el) return;
+  if(!window.L || !x.a){ el.style.display = "none"; return; }
+  if(stageMap){ try{ stageMap.remove(); }catch(e){} stageMap = null; }
+  stageMap = L.map(el, { zoomControl: true, attributionControl: true, scrollWheelZoom: false }).setView([-51.0, -73.0], 10);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 17, attribution: "© OpenStreetMap" }).addTo(stageMap);
+  const mine = stageMap;
+  const [a, b] = [await geoLookup(x.a, "tdp"), await geoLookup(x.b, "tdp")];
+  if(mine !== stageMap) return;
+  const pts = [a, b].filter(Boolean);
+  if(a) L.circleMarker(a, { radius: 7, color: "#fff", weight: 2, fillColor: "#2f7a45", fillOpacity: 1 }).addTo(stageMap).bindPopup("Start");
+  if(b) L.circleMarker(b, { radius: 8, color: "#fff", weight: 2, fillColor: "#d26a12", fillOpacity: 1 }).addTo(stageMap).bindPopup("Ziel");
+  if(a && b) L.polyline([a, b], { color: "#d26a12", weight: 3, dashArray: "6 6" }).addTo(stageMap);
+  if(pts.length === 2) stageMap.fitBounds(L.latLngBounds(pts).pad(0.35), { maxZoom: 13 });
+  else if(pts.length === 1) stageMap.setView(pts[0], 12);
+  else { const n = $("#stageMapNote"); if(n) n.textContent = "Karte braucht beim ersten Mal Netz, danach sind die Punkte gespeichert."; }
+}
+function mapsCardHtml(){
+  return `<div class="card"><h3>Offline-Karten für den Trek</h3>
+    <p style="margin:0 0 8px"><b>Hauptkarte: Organic Maps</b> (kostenlos, ohne Werbung). Die App nutzt dieselben OpenStreetMap-Daten wie Maps.me, ist aber schlanker. Die Wege im Park sind dort sehr genau eingezeichnet, inklusive Camps, Brücken und Ranger-Posten. GPS funktioniert ganz ohne Netz.</p>
+    <p style="margin:0 0 8px"><b>Zweite Karte: Komoot</b>, wenn ihr es eh nutzt. Region „Torres del Paine“ offline speichern und die O-Runde als Tour planen. Gut für Höhenprofil und Zeitplanung.</p>
+    <ul class="dots"><li>Vorher zu Hause: in Organic Maps „Chile – Magallanes“ und „Argentinien – Santa Cruz/Tierra del Fuego“ herunterladen.</li><li>Beide speichern, wer welche App nutzt: zwei Handys, zwei Apps = Ausfallsicherheit.</li><li>Flugmodus mit GPS an spart Akku, Powerbank nachts im Schlafsack warm halten.</li><li>Wind-Vorhersage: Windguru (Spot Torres del Paine) zeigt Böen besser als normale Wetter-Apps.</li></ul></div>`;
 }
 function ringSvg(){
   // Schematische Runde: Punkte auf einer Ellipse, gegen den Uhrzeigersinn ab Central (Osten)
@@ -321,6 +390,7 @@ const CAT_ALIAS = { essen: "food", bar: "food", aussicht: "aktiv", wandern: "akt
 function catOf(x){ return TCATS[x.c || x.cat] ? (x.c || x.cat) : (CAT_ALIAS[x.cat] || "aktiv"); }
 const CURATED = (typeof TIPS !== "undefined" ? TIPS : []).map((t, i) => ({ ...t, id: "tip" + i, cur: true, region: t.r, name: t.n, note: t.t }));
 let tipCat = "alle";
+function defaultRegion(){ const t = new Date().toISOString().slice(0,10); if(t >= "2026-11-14" && t <= "2026-11-16") return "ush"; if(t === "2026-11-17") return "cal"; if(t >= "2026-11-18" && t <= "2026-11-25") return "tdp"; return "ba"; }
 /* Koordinaten für kuratierte Tipps: einmal online über Photon suchen, dann im Browser merken */
 const GEO_KEY = "pat:geo-v1";
 let geoCache = (() => { try{ return JSON.parse(localStorage.getItem(GEO_KEY)) || {}; }catch(e){ return {}; } })();
@@ -353,14 +423,14 @@ const SPOT_REGIONS = [
   { k: "cal", n: "El Calafate", lat: -50.34, lon: -72.27, z: 11 },
   { k: "tdp", n: "Torres del Paine", lat: -51.00, lon: -73.00, z: 10 }
 ];
-let spotMap = null, spotLayer = null, spotRegion = "alle", spotPick = null, spotPickMarker = null, spotSearchTimer = null;
+let spotMap = null, spotLayer = null, spotRegion = defaultRegion(), spotPick = null, spotPickMarker = null, spotSearchTimer = null;
 function nearestRegion(lat, lon){ let best = null, bd = 1e9; SPOT_REGIONS.forEach(r => { const d = (r.lat-lat)**2 + (r.lon-lon)**2; if(d < bd){ bd = d; best = r; } }); return best ? best.k : ""; }
 function gmaps(s){ return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(s.lat + "," + s.lon); }
 function safeLink(u){ return /^https:\/\//i.test(u || "") ? u : ""; }
 function spotsHtml(){
   return `<div class="card" id="spotCard">
     <div class="sechead"><h3>Unsere Tipps & eure Fundstücke</h3><span class="small muted" id="spotCount"></span></div>
-    <div class="placetabs" id="spotRegions" role="group" aria-label="Gegend">${[["alle","Alle"], ...SPOT_REGIONS.map(r => [r.k, r.n])].map(([k,n]) => `<button type="button" data-sr="${k}" aria-pressed="${k === spotRegion}">${esc(n)}</button>`).join("")}</div>
+    <div class="placetabs" id="spotRegions" role="group" aria-label="Gegend">${SPOT_REGIONS.map(r => [r.k, r.n]).map(([k,n]) => `<button type="button" data-sr="${k}" aria-pressed="${k === spotRegion}">${esc(n)}</button>`).join("")}</div>
     <div class="placetabs" id="spotCats" role="group" aria-label="Kategorie">${[["alle","Alles"], ...Object.entries(TCATS).map(([k,[n]]) => [k, n])].map(([k,n]) => `<button type="button" data-sc="${k}" aria-pressed="${k === tipCat}">${esc(n)}</button>`).join("")}</div>
     <div id="spotMap" class="spotmap" role="application" aria-label="Karte mit Tipps"></div>
     <p class="small muted" style="margin:4px 0 0">Karte braucht Netz. Ohne Netz bleibt die Liste unten nutzbar. Kartendaten © OpenStreetMap.</p>
@@ -419,7 +489,8 @@ function spotListHtml(){
 function initSpotMap(){
   const el = $("#spotMap"); if(!el || !window.L) return;
   if(spotMap){ try{ spotMap.remove(); }catch(e){} spotMap = null; }
-  spotMap = L.map(el, { zoomControl: true, attributionControl: true }).setView([-45, -66], 4);
+  const r0 = SPOT_REGIONS.find(x => x.k === spotRegion) || SPOT_REGIONS[0];
+  spotMap = L.map(el, { zoomControl: true, attributionControl: true, scrollWheelZoom: false }).setView([r0.lat, r0.lon], r0.z);
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(spotMap);
   spotLayer = L.layerGroup().addTo(spotMap);
   spotMap.on("click", e => { if(!$("#spotAdd")) return; $("#spotAdd").open = true; setPick(e.latlng.lat, e.latlng.lng, $("#spName").value || ""); $("#spMsg").textContent = "Markierung gesetzt. Name eintragen und merken."; });
