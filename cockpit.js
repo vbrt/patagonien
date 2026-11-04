@@ -270,6 +270,7 @@ function renderTrek(){
     <p class="small muted" style="margin:6px 0 0">Etappe antippen für Details.</p>
   </div>
   <div class="card" id="stageCard"></div>
+  <div class="card" id="offlineCard"></div>
   ${mapsCardHtml()}
   <div class="grid2">
     <div class="card crit"><h3>Königsetappe 21.11.</h3><p style="margin:0">Von Los Perros über den John-Garner-Pass (1.241 m) nach Grey. Früh los, Ranger geben die Startzeit vor. Bei Sturm wird der Pass gesperrt, dann müsst ihr eventuell eine Nacht länger in Los Perros bleiben: eine Reserveportion Essen einpacken.</p></div>
@@ -279,6 +280,7 @@ function renderTrek(){
   </div>`;
   v.querySelectorAll("[data-stage]").forEach(el => el.addEventListener("click", () => { stageSel = +el.dataset.stage; renderStage(); if(el.tagName === "TR") $("#stageCard").scrollIntoView({ behavior: "smooth", block: "start" }); }));
   renderStage();
+  renderOfflineCard().then(async () => { const s = await offlineStatus(); const old = !s.wxAt || Date.now() - s.wxAt > 6*3600e3; if(navigator.onLine !== false && (!s.trail || s.nprof < TREK.length || old)) runOffline(false); });
 }
 let stageSel = null, stageMap = null;
 function defaultStage(){
@@ -294,8 +296,10 @@ function renderStage(){
     <div class="sechead" style="margin-top:10px"><h3>Tag ${stageSel+1}: ${esc(s.from)} → ${esc(s.to)}</h3></div>
     <div class="chips" style="margin:0 0 8px"><span class="chip trail">${String(s.km).replace(".",",")} km</span><span class="chip">${esc(s.h)} Std.</span>${x.up ? `<span class="chip">ca. ${esc(x.up)} / ${esc(x.down)}</span>` : ""}${x.lvl ? `<span class="chip">${esc(x.lvl)}</span>` : ""}<span class="chip">Nacht: ${esc(s.sleep)}</span></div>
     ${x.desc ? `<p style="margin:0 0 10px">${esc(x.desc)}</p>` : ""}
-    <div id="stageMap" class="spotmap" style="height:200px" role="img" aria-label="Karte der Etappe"></div>
-    <p class="small muted" id="stageMapNote" style="margin:4px 0 10px">Start und Ziel als Punkte, die Linie ist nur die Luftlinie. Für den echten Weg die Offline-Karte unten nutzen.</p>
+    <div id="stageWx" class="stagewx"></div>
+    <div id="stageMap" class="spotmap" style="height:220px" role="img" aria-label="Karte der Etappe"></div>
+    <div class="row-gps"><button type="button" class="btn" id="gpsBtn">📍 Wo bin ich?</button><span class="small muted" id="stageMapNote"></span></div>
+    <div id="stageProf" class="stageprof"></div>
     <div class="grid2">
       ${x.hi ? `<div><h3 style="margin:0 0 6px">Highlights</h3><ul class="dots">${x.hi.map(h => `<li>${esc(h)}</li>`).join("")}</ul></div>` : ""}
       ${x.tips ? `<div><h3 style="margin:0 0 6px">Tipps</h3><ul class="dots">${x.tips.map(h => `<li>${esc(h)}</li>`).join("")}</ul></div>` : ""}
@@ -304,7 +308,9 @@ function renderStage(){
     <div style="margin-top:10px">${noteBox("etappe-" + stageSel, "Eure Notizen zur Etappe: Startzeit, Wasserstellen, was gut war …")}</div>`;
   box.querySelectorAll("[data-st]").forEach(b => b.addEventListener("click", () => { stageSel = +b.dataset.st; renderStage(); }));
   bindNotes(box);
+  $("#gpsBtn").addEventListener("click", locateMe);
   drawStageMap(x);
+  renderStageWx();
 }
 async function geoLookup(q, region){
   if(geoCache[q] !== undefined) return geoCache[q] || null;
@@ -321,28 +327,231 @@ async function geoLookup(q, region){
     return geoCache[q] || null;
   }catch(e){ return null; }
 }
+let stageRoute = null, gpsMarker = null;
 async function drawStageMap(x){
   const el = $("#stageMap"); if(!el) return;
+  const note = t => { const n = $("#stageMapNote"); if(n) n.textContent = t; };
   if(!window.L || !x.a){ el.style.display = "none"; return; }
   if(stageMap){ try{ stageMap.remove(); }catch(e){} stageMap = null; }
-  stageMap = L.map(el, { zoomControl: true, attributionControl: true, scrollWheelZoom: false }).setView([-51.0, -73.0], 10);
+  gpsMarker = null; stageRoute = null;
+  stageMap = L.map(el, { zoomControl: true, attributionControl: true, scrollWheelZoom: false, preferCanvas: true }).setView([-50.98, -73.0], 10);
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 17, attribution: "© OpenStreetMap" }).addTo(stageMap);
-  const mine = stageMap;
-  const [a, b] = [await geoLookup(x.a, "tdp"), await geoLookup(x.b, "tdp")];
+  const mine = stageMap, idx = stageSel;
+  const T = await loadTrail();
   if(mine !== stageMap) return;
-  const pts = [a, b].filter(Boolean);
-  if(a) L.circleMarker(a, { radius: 7, color: "#fff", weight: 2, fillColor: "#2f7a45", fillOpacity: 1 }).addTo(stageMap).bindPopup("Start");
-  if(b) L.circleMarker(b, { radius: 8, color: "#fff", weight: 2, fillColor: "#d26a12", fillOpacity: 1 }).addTo(stageMap).bindPopup("Ziel");
-  if(a && b) L.polyline([a, b], { color: "#d26a12", weight: 3, dashArray: "6 6" }).addTo(stageMap);
-  if(pts.length === 2) stageMap.fitBounds(L.latLngBounds(pts).pad(0.35), { maxZoom: 13 });
-  else if(pts.length === 1) stageMap.setView(pts[0], 12);
-  else { const n = $("#stageMapNote"); if(n) n.textContent = "Karte braucht beim ersten Mal Netz, danach sind die Punkte gespeichert."; }
+  if(T){ T.ways.forEach(w => L.polyline(w.map(id => T.nodes[id]).filter(Boolean), { color: "#7d8a92", weight: 1.5, opacity: .6, interactive: false }).addTo(stageMap)); }
+  const r = T ? stageRouteFor(T, idx) : null;
+  if(r){
+    stageRoute = r;
+    L.polyline(r.pts, { color: "#d26a12", weight: 5, opacity: .95 }).addTo(stageMap);
+    L.circleMarker(r.pts[0], { radius: 7, color: "#fff", weight: 2, fillColor: "#2f7a45", fillOpacity: 1 }).addTo(stageMap).bindPopup("Start: " + esc(r.from));
+    L.circleMarker(r.pts[r.pts.length-1], { radius: 8, color: "#fff", weight: 2, fillColor: "#d26a12", fillOpacity: 1 }).addTo(stageMap).bindPopup("Ziel: " + esc(r.to));
+    T.pois.filter(p => p.t === "pass" || p.t === "ranger").forEach(p => L.circleMarker([p.lat, p.lon], { radius: 4, color: "#b23a2e", weight: 2, fillColor: "#fff", fillOpacity: 1 }).addTo(stageMap).bindPopup(esc(p.n)));
+    stageMap.fitBounds(L.latLngBounds(r.pts).pad(0.12), { maxZoom: 14 });
+    note(`Weg aus OpenStreetMap, ${fmtKm(r.km)} km${idx === 7 ? " pro Richtung" : ""}. Funktioniert offline.`);
+    renderProfile(idx, r);
+  } else {
+    const [a, b] = [await geoLookup(x.a, "tdp"), await geoLookup(x.b, "tdp")];
+    if(mine !== stageMap) return;
+    const pts = [a, b].filter(Boolean);
+    if(a) L.circleMarker(a, { radius: 7, color: "#fff", weight: 2, fillColor: "#2f7a45", fillOpacity: 1 }).addTo(stageMap);
+    if(b) L.circleMarker(b, { radius: 8, color: "#fff", weight: 2, fillColor: "#d26a12", fillOpacity: 1 }).addTo(stageMap);
+    if(a && b) L.polyline([a, b], { color: "#d26a12", weight: 3, dashArray: "6 6" }).addTo(stageMap);
+    if(pts.length === 2) stageMap.fitBounds(L.latLngBounds(pts).pad(0.35), { maxZoom: 13 });
+    note(T ? "Weg für diese Etappe nicht sicher erkannt, gezeigt ist die Luftlinie." : "Wanderwege noch nicht geladen: unten im Offline-Paket mit Netz laden.");
+    const pb = $("#stageProf"); if(pb) pb.innerHTML = "";
+  }
 }
 function mapsCardHtml(){
   return `<div class="card"><h3>Offline-Karten für den Trek</h3>
     <p style="margin:0 0 8px"><b>Hauptkarte: Organic Maps</b> (kostenlos, ohne Werbung). Die App nutzt dieselben OpenStreetMap-Daten wie Maps.me, ist aber schlanker. Die Wege im Park sind dort sehr genau eingezeichnet, inklusive Camps, Brücken und Ranger-Posten. GPS funktioniert ganz ohne Netz.</p>
     <p style="margin:0 0 8px"><b>Zweite Karte: Komoot</b>, wenn ihr es eh nutzt. Region „Torres del Paine“ offline speichern und die O-Runde als Tour planen. Gut für Höhenprofil und Zeitplanung.</p>
     <ul class="dots"><li>Vorher zu Hause: in Organic Maps „Chile – Magallanes“ und „Argentinien – Santa Cruz/Tierra del Fuego“ herunterladen.</li><li>Beide speichern, wer welche App nutzt: zwei Handys, zwei Apps = Ausfallsicherheit.</li><li>Flugmodus mit GPS an spart Akku, Powerbank nachts im Schlafsack warm halten.</li><li>Wind-Vorhersage: Windguru (Spot Torres del Paine) zeigt Böen besser als normale Wetter-Apps.</li></ul></div>`;
+}
+/* ============ TREK OFFLINE: Wege, Höhenprofil, Wetter, GPS ============ */
+const TRAIL_CACHE = "pat-trail-v1", TRAIL_URL = "/pat-trail.json";
+const TBOX = [-51.16, -73.32, -50.74, -72.74]; // S, W, N, E
+let trailData = null, trailGraph = null;
+const fmtKm = k => (Math.round(k*10)/10).toString().replace(".", ",");
+function hav(a, b){ const R = 6371, r = Math.PI/180, dLa = (b[0]-a[0])*r, dLo = (b[1]-a[1])*r; const s = Math.sin(dLa/2)**2 + Math.cos(a[0]*r)*Math.cos(b[0]*r)*Math.sin(dLo/2)**2; return 2*R*Math.asin(Math.sqrt(s)); }
+async function loadTrail(){
+  if(trailData) return trailData;
+  try{ const c = await caches.open(TRAIL_CACHE); const r = await c.match(TRAIL_URL); if(r){ trailData = await r.json(); return trailData; } }catch(e){}
+  return null;
+}
+async function fetchTrail(){
+  const bb = TBOX.join(",");
+  const q1 = `[out:json][timeout:90];way["highway"~"^(path|footway|track|bridleway|steps)$"](${bb});out body;>;out skel qt;`;
+  const q2 = `[out:json][timeout:60];(node["tourism"~"^(camp_site|alpine_hut|wilderness_hut|hostel|hotel|viewpoint)$"](${bb});way["tourism"~"^(camp_site|alpine_hut|wilderness_hut|hostel|hotel)$"](${bb});node["mountain_pass"="yes"](${bb});node["natural"="saddle"](${bb});node["amenity"="ranger_station"](${bb});way["amenity"="ranger_station"](${bb});node["natural"="water"]["name"~"Torres"](${bb}););out center tags;`;
+  const get = async q => { const r = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } }); if(!r.ok) throw new Error("Overpass " + r.status); return r.json(); };
+  const [j1, j2] = [await get(q1), await get(q2)];
+  const nodes = {}, ways = [];
+  j1.elements.forEach(el => { if(el.type === "node") nodes[el.id] = [+el.lat.toFixed(5), +el.lon.toFixed(5)]; });
+  j1.elements.forEach(el => { if(el.type === "way" && el.nodes && el.nodes.length > 1) ways.push(el.nodes); });
+  const pois = j2.elements.map(el => { const t = el.tags || {}; const lat = el.lat ?? (el.center && el.center.lat), lon = el.lon ?? (el.center && el.center.lon);
+    const typ = t.mountain_pass === "yes" || t.natural === "saddle" ? "pass" : t.amenity === "ranger_station" ? "ranger" : t.natural === "water" ? "water" : t.tourism === "viewpoint" ? "view" : "camp";
+    return lat != null && t.name ? { n: t.name, t: typ, lat: +lat.toFixed(5), lon: +lon.toFixed(5) } : null; }).filter(Boolean);
+  if(ways.length < 20) throw new Error("zu wenige Wege");
+  trailData = { at: Date.now(), nodes, ways, pois }; trailGraph = null;
+  try{ const c = await caches.open(TRAIL_CACHE); await c.put(TRAIL_URL, new Response(JSON.stringify(trailData), { headers: { "Content-Type": "application/json" } })); }catch(e){}
+  return trailData;
+}
+function buildGraph(T){
+  if(trailGraph) return trailGraph;
+  const adj = new Map();
+  const add = (a, b) => { const pa = T.nodes[a], pb = T.nodes[b]; if(!pa || !pb) return; const d = hav(pa, pb); if(!adj.has(a)) adj.set(a, []); if(!adj.has(b)) adj.set(b, []); adj.get(a).push([b, d]); adj.get(b).push([a, d]); };
+  T.ways.forEach(w => { for(let i = 1; i < w.length; i++) add(w[i-1], w[i]); });
+  trailGraph = adj; return adj;
+}
+const norm = s => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+const STAGE_PTS = [["central"],["seron"],["dickson"],["perros"],["grey"],["paine grande"],["cuernos"],["central"],["torres"]];
+function findPoi(T, keys, idx){
+  const k = keys.map(norm);
+  const cands = T.pois.filter(p => k.some(x => norm(p.n).includes(x)));
+  if(!cands.length) return null;
+  if(idx === 8){ return cands.find(p => p.t === "water") || cands.find(p => p.t === "view" && norm(p.n).includes("base")) || cands.find(p => p.t === "view") || null; }
+  return cands.find(p => p.t === "camp") || cands[0];
+}
+function nearestNode(T, adj, p){ let best = null, bd = 1e9; for(const id of adj.keys()){ const q = T.nodes[id]; const d = (q[0]-p[0])**2 + ((q[1]-p[1])*0.63)**2; if(d < bd){ bd = d; best = id; } } return best; }
+function dijkstra(adj, s, t){
+  const dist = new Map([[s, 0]]), prev = new Map(), heap = [[0, s]];
+  const push = x => { heap.push(x); let i = heap.length-1; while(i > 0){ const p = (i-1) >> 1; if(heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
+  const pop = () => { const top = heap[0], last = heap.pop(); if(heap.length){ heap[0] = last; let i = 0; for(;;){ const l = 2*i+1, r = l+1; let m = i; if(l < heap.length && heap[l][0] < heap[m][0]) m = l; if(r < heap.length && heap[r][0] < heap[m][0]) m = r; if(m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
+  while(heap.length){ const [d, u] = pop(); if(u === t) break; if(d > (dist.get(u) ?? 1e9)) continue; for(const [v, w] of adj.get(u) || []){ const nd = d + w; if(nd < (dist.get(v) ?? 1e9)){ dist.set(v, nd); prev.set(v, u); push([nd, v]); } } }
+  if(!dist.has(t)) return null;
+  const path = [t]; let u = t; while(prev.has(u)){ u = prev.get(u); path.push(u); } return { path: path.reverse(), km: dist.get(t) };
+}
+const routeCache = {};
+function stageRouteFor(T, i){
+  if(routeCache[i] !== undefined) return routeCache[i];
+  const a = findPoi(T, STAGE_PTS[i], i), b = findPoi(T, STAGE_PTS[i+1], i+1);
+  let res = null;
+  if(a && b){
+    const adj = buildGraph(T); const s = nearestNode(T, adj, [a.lat, a.lon]), t = nearestNode(T, adj, [b.lat, b.lon]);
+    const r = s && t ? dijkstra(adj, s, t) : null;
+    const want = TREK[i] ? (i === 7 ? TREK[i].km / 2 : TREK[i].km) : 0;
+    if(r && r.km > want * 0.45 && r.km < want * 1.9){ res = { pts: r.path.map(id => T.nodes[id]), km: r.km, from: a.n, to: b.n }; }
+  }
+  routeCache[i] = res; return res;
+}
+/* Höhenprofil über Open-Meteo Elevation, einmal laden, dann lokal */
+const PROF_KEY = "pat:prof-v1";
+function profStore(){ try{ return JSON.parse(localStorage.getItem(PROF_KEY)) || {}; }catch(e){ return {}; } }
+function samplePts(pts, n){ const cum = [0]; for(let i = 1; i < pts.length; i++) cum.push(cum[i-1] + hav(pts[i-1], pts[i])); const tot = cum[cum.length-1]; const out = []; let j = 0;
+  for(let k = 0; k < n; k++){ const d = tot * k / (n-1); while(j < cum.length-2 && cum[j+1] < d) j++; const f = cum[j+1] > cum[j] ? (d - cum[j]) / (cum[j+1] - cum[j]) : 0; out.push([pts[j][0] + (pts[j+1][0]-pts[j][0])*f, pts[j][1] + (pts[j+1][1]-pts[j][1])*f, d]); } return out; }
+async function fetchProfile(i, r){
+  const S = samplePts(r.pts, 100);
+  const url = `https://api.open-meteo.com/v1/elevation?latitude=${S.map(p => p[0].toFixed(5)).join(",")}&longitude=${S.map(p => p[1].toFixed(5)).join(",")}`;
+  const res = await fetch(url); if(!res.ok) throw new Error("elev"); const j = await res.json();
+  const prof = { d: S.map(p => +p[2].toFixed(2)), e: j.elevation.map(x => Math.round(x)), pts: S.map(p => [+p[0].toFixed(5), +p[1].toFixed(5)]) };
+  const st = profStore(); st[i] = prof; try{ localStorage.setItem(PROF_KEY, JSON.stringify(st)); }catch(e){}
+  return prof;
+}
+function gainLoss(e){ let up = 0, dn = 0, ref = e[0]; for(const x of e){ const d = x - ref; if(Math.abs(d) >= 8){ if(d > 0) up += d; else dn -= d; ref = x; } } return [Math.round(up/10)*10, Math.round(dn/10)*10]; }
+async function renderProfile(i, r){
+  const box = $("#stageProf"); if(!box) return;
+  let p = profStore()[i];
+  if(!p && navigator.onLine !== false){ box.innerHTML = '<p class="small muted">Höhenprofil wird geladen …</p>'; try{ p = await fetchProfile(i, r); }catch(e){} }
+  if(stageSel !== i) return;
+  if(!p){ box.innerHTML = '<p class="small muted">Höhenprofil: beim nächsten Mal mit Netz.</p>'; return; }
+  const W = 600, H = 130, pad = 28, max = Math.max(...p.e), min = Math.min(...p.e), tot = p.d[p.d.length-1] || 1, span = Math.max(50, max - min);
+  const X = d => pad + d / tot * (W - pad - 6), Y = e => 8 + (1 - (e - min) / span) * (H - 30);
+  const line = p.d.map((d,k) => `${k ? "L" : "M"}${X(d).toFixed(1)},${Y(p.e[k]).toFixed(1)}`).join(" ");
+  const [up, dn] = gainLoss(p.e); const kmax = p.e.indexOf(max);
+  box.innerHTML = `<div class="sechead" style="margin-top:8px"><h3 style="margin:0">Höhenprofil</h3><span class="small muted">↑ ${up} m · ↓ ${dn} m · höchster Punkt ${max} m</span></div>
+  <svg viewBox="0 0 ${W} ${H}" class="profsvg" role="img" aria-label="Höhenprofil der Etappe">
+    <path d="${line} L${X(tot).toFixed(1)},${H-22} L${X(0)},${H-22} Z" fill="var(--trail)" opacity=".18"/>
+    <path d="${line}" fill="none" stroke="var(--trail)" stroke-width="2.5"/>
+    <circle cx="${X(p.d[kmax]).toFixed(1)}" cy="${Y(max).toFixed(1)}" r="4" fill="var(--crit)"/>
+    <text x="${pad-4}" y="${Y(max)+4}" text-anchor="end" font-size="11" fill="var(--muted)">${max}</text>
+    <text x="${pad-4}" y="${Y(min)+4}" text-anchor="end" font-size="11" fill="var(--muted)">${min}</text>
+    <text x="${X(0)}" y="${H-6}" font-size="11" fill="var(--muted)">0 km</text>
+    <text x="${X(tot)}" y="${H-6}" text-anchor="end" font-size="11" fill="var(--muted)">${fmtKm(tot)} km</text>
+  </svg>`;
+}
+/* Wetter pro Etappe: Open-Meteo, Höchster Punkt bzw. Ziel, gespeichert für offline */
+const TWX_KEY = "pat:trekwx-v1";
+function stageISO(i){ const [d,m] = TREK[i].d.split("."); return `2026-${m.padStart(2,"0")}-${d.padStart(2,"0")}`; }
+function stagePoint(i){
+  const p = profStore()[i]; if(p){ const k = p.e.indexOf(Math.max(...p.e)); return { lat: p.pts[k][0], lon: p.pts[k][1], ele: p.e[k], hi: true }; }
+  const r = trailData ? stageRouteFor(trailData, i) : null; if(r){ const q = r.pts[r.pts.length-1]; return { lat: q[0], lon: q[1] }; }
+  return { lat: -51.0, lon: -73.0 };
+}
+async function fetchTrekWx(){
+  const P = TREK.map((_, i) => stagePoint(i));
+  const ele = P.every(p => p.ele != null) ? "&elevation=" + P.map(p => p.ele).join(",") : "";
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${P.map(p => p.lat.toFixed(4)).join(",")}&longitude=${P.map(p => p.lon.toFixed(4)).join(",")}${ele}&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max&hourly=wind_gusts_10m,temperature_2m&wind_speed_unit=kmh&timezone=America%2FSantiago&forecast_days=16`;
+  const res = await fetch(url); if(!res.ok) throw new Error("wx"); const j = await res.json(); const arr = Array.isArray(j) ? j : [j];
+  const out = { at: Date.now(), st: {} };
+  TREK.forEach((_, i) => { const x = arr[i], iso = stageISO(i); if(!x || !x.daily) return; const k = x.daily.time.indexOf(iso); if(k < 0) return;
+    const hrs = []; (x.hourly.time || []).forEach((t, h) => { if(t.startsWith(iso)){ const hh = +t.slice(11,13); if(hh >= 6 && hh <= 18 && hh % 2 === 0) hrs.push([hh, Math.round(x.hourly.wind_gusts_10m[h]), Math.round(x.hourly.temperature_2m[h])]); } });
+    out.st[i] = { code: x.daily.weather_code[k], hi: Math.round(x.daily.temperature_2m_max[k]), lo: Math.round(x.daily.temperature_2m_min[k]), rain: Math.round(x.daily.precipitation_sum[k]*10)/10, wind: Math.round(x.daily.wind_speed_10m_max[k]), gust: Math.round(x.daily.wind_gusts_10m_max[k]), hrs, high: !!P[i].hi, ele: P[i].ele }; });
+  try{ localStorage.setItem(TWX_KEY, JSON.stringify(out)); }catch(e){}
+  return out;
+}
+function trekWx(){ try{ return JSON.parse(localStorage.getItem(TWX_KEY)); }catch(e){ return null; } }
+function renderStageWx(){
+  const box = $("#stageWx"); if(!box) return; const W = trekWx(); const i = stageSel;
+  const d = W && W.st && W.st[i];
+  if(!d){ const days = Math.round((new Date(stageISO(i)) - new Date()) / 864e5); box.innerHTML = `<p class="small muted" style="margin:0 0 8px">Wetter für den ${esc(TREK[i].d)}: ${days > 15 ? `Prognose gibt es ab ca. ${days - 15} Tagen.` : "beim nächsten Laden mit Netz."}</p>`; return; }
+  const WI = {0:["☀️","Klar"],1:["🌤️","Überwiegend klar"],2:["⛅","Teils bewölkt"],3:["☁️","Bedeckt"],45:["🌫️","Nebel"],48:["🌫️","Nebel"],51:["🌦️","Niesel"],53:["🌦️","Niesel"],55:["🌧️","Niesel"],61:["🌧️","Leichter Regen"],63:["🌧️","Regen"],65:["🌧️","Starker Regen"],66:["🌧️","Gefrierender Regen"],67:["🌧️","Gefrierender Regen"],71:["🌨️","Leichter Schnee"],73:["🌨️","Schnee"],75:["❄️","Starker Schnee"],77:["🌨️","Schneegriesel"],80:["🌦️","Schauer"],81:["🌧️","Schauer"],82:["⛈️","Heftige Schauer"],85:["🌨️","Schneeschauer"],86:["❄️","Schneeschauer"],95:["⛈️","Gewitter"],96:["⛈️","Gewitter"],99:["⛈️","Gewitter"]};
+  const w = WI[d.code] || ["🌡️", ""];
+  const gc = d.gust >= 80 ? "red" : d.gust >= 55 ? "warn" : "";
+  box.innerHTML = `<div class="wxstage"><div class="sechead"><b>${w[0]} ${esc(w[1])} · ${d.hi}°/${d.lo}°</b><span class="small muted">Stand ${new Date(W.at).toLocaleString("de-DE",{day:"numeric",month:"numeric",hour:"2-digit",minute:"2-digit"})}</span></div>
+    <div class="chips"><span class="chip ${gc}">Böen bis ${d.gust} km/h</span><span class="chip">Wind ${d.wind} km/h</span><span class="chip">${d.rain} mm Niederschlag</span>${d.high ? `<span class="chip grey">am höchsten Punkt${d.ele ? ", " + d.ele + " m" : ""}</span>` : ""}</div>
+    ${d.hrs && d.hrs.length ? `<div class="small muted" style="margin-top:6px">Böen im Tagesverlauf: ${d.hrs.map(h => `${h[0]} Uhr ${h[1]}`).join(" · ")} km/h</div>` : ""}
+    ${d.gust >= 80 ? '<p class="small" style="margin:6px 0 0;color:var(--crit)"><b>Sturm möglich.</b> Ranger können Wege oder den Pass sperren. Früh starten, Plan B besprechen.</p>' : ""}
+    <p class="small muted" style="margin:4px 0 0">Mehr als 3–4 Tage voraus nur eine Tendenz. In Patagonien ändert sich das Wetter stündlich.</p></div>`;
+}
+/* GPS: Wo bin ich auf der Etappe? */
+function locateMe(){
+  const note = t => { const n = $("#stageMapNote"); if(n) n.textContent = t; };
+  if(!navigator.geolocation){ note("Dieses Gerät kann keinen Standort liefern."); return; }
+  note("Suche GPS-Signal … (offline kann das 1–2 Minuten dauern)");
+  navigator.geolocation.getCurrentPosition(pos => {
+    const me = [pos.coords.latitude, pos.coords.longitude];
+    if(stageMap){ if(gpsMarker) gpsMarker.remove(); gpsMarker = L.circleMarker(me, { radius: 8, color: "#fff", weight: 3, fillColor: "#1a73e8", fillOpacity: 1 }).addTo(stageMap).bindPopup("Ihr seid hier"); }
+    const r = stageRoute;
+    if(!r){ if(stageMap) stageMap.setView(me, 13); note(`Standort ±${Math.round(pos.coords.accuracy)} m. Für die Strecke bis zum Ziel bitte Wanderwege laden.`); return; }
+    let bi = 0, bd = 1e9; r.pts.forEach((p, k) => { const d = hav(p, me); if(d < bd){ bd = d; bi = k; } });
+    let rest = 0; for(let k = bi + 1; k < r.pts.length; k++) rest += hav(r.pts[k-1], r.pts[k]);
+    if(stageMap) stageMap.setView(me, Math.max(stageMap.getZoom(), 13));
+    note(bd > 1 ? `Ihr seid ${fmtKm(bd)} km neben dieser Etappe (±${Math.round(pos.coords.accuracy)} m). Andere Etappe gewählt?` : `Auf dem Weg. Noch ca. ${fmtKm(rest)} km bis ${r.to} (±${Math.round(pos.coords.accuracy)} m).`);
+  }, err => note(err.code === 1 ? "Standortzugriff verweigert: in den iPhone-Einstellungen für Safari erlauben." : "Kein GPS-Signal. Kurz ins Freie und nochmal versuchen."), { enableHighAccuracy: true, timeout: 120000, maximumAge: 60000 });
+}
+/* Offline-Paket: alles einmal laden */
+async function offlineStatus(){
+  const T = await loadTrail(); const P = profStore(); const W = trekWx();
+  const nprof = TREK.filter((_, i) => P[i]).length;
+  return { trail: !!T, trailAt: T && T.at, nprof, wxAt: W && W.at };
+}
+async function renderOfflineCard(){
+  const box = $("#offlineCard"); if(!box) return; const s = await offlineStatus();
+  const f = t => t ? new Date(t).toLocaleString("de-DE",{day:"numeric",month:"numeric",hour:"2-digit",minute:"2-digit"}) : "–";
+  box.innerHTML = `<div class="sechead"><h3>Offline-Paket für den Trek</h3></div>
+    <ul class="dots" style="margin:0 0 8px">
+      <li>${s.trail ? "✅" : "⬜"} Wanderwege & Camps ${s.trail ? "(Stand " + f(s.trailAt) + ")" : ""}</li>
+      <li>${s.nprof === TREK.length ? "✅" : "⬜"} Höhenprofile ${s.nprof}/${TREK.length}</li>
+      <li>${s.wxAt ? "✅" : "⬜"} Wetter pro Etappe ${s.wxAt ? "(Stand " + f(s.wxAt) + ")" : ""}</li>
+    </ul>
+    <button type="button" class="btn" id="offlineBtn">${s.trail ? "Aktualisieren" : "Jetzt laden"}</button> <span class="small muted" id="offlineMsg">${esc(offlineLast)}</span>
+    <p class="small muted" style="margin:8px 0 0">Auf beiden Handys einmal laden. Wetter zuletzt am Abend des 17.11. in El Calafate aktualisieren. Die Karte darunter (Landschaft) gibt es offline nicht, Weg, Camps und euer Standort funktionieren aber.</p>`;
+  $("#offlineBtn").addEventListener("click", () => runOffline(true));
+}
+let offlineRunning = false, offlineLast = "";
+async function runOffline(manual){
+  if(offlineRunning) return; const msg = t => { offlineLast = t; const m = $("#offlineMsg"); if(m) m.textContent = t; };
+  if(navigator.onLine === false){ msg("Kein Netz."); return; }
+  offlineRunning = true;
+  try{
+    let T = await loadTrail();
+    if(!T || manual){ msg("Lade Wanderwege …"); T = await fetchTrail(); Object.keys(routeCache).forEach(k => delete routeCache[k]); }
+    const P = profStore();
+    for(let i = 0; i < TREK.length; i++){ if(P[i] && !manual) continue; const r = stageRouteFor(T, i); if(r){ msg(`Höhenprofil ${i+1}/${TREK.length} …`); try{ await fetchProfile(i, r); }catch(e){} } }
+    msg("Lade Wetter …"); try{ await fetchTrekWx(); }catch(e){}
+    msg("Fertig."); renderStage();
+  }catch(e){ msg("Laden hat nicht geklappt: " + (e.message || "Fehler") + ". Später nochmal versuchen."); }
+  finally{ offlineRunning = false; renderOfflineCard(); }
 }
 function ringSvg(){
   // Schematische Runde: Punkte auf einer Ellipse, gegen den Uhrzeigersinn ab Central (Osten)
