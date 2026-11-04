@@ -405,32 +405,56 @@ function buildGraph(T){
 }
 const norm = s => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const STAGE_PTS = [["central"],["seron"],["dickson"],["perros"],["grey"],["paine grande"],["cuernos"],["central"],["torres"]];
-function findPoi(T, keys, idx){
+function findPois(T, keys, idx){
   const k = keys.map(norm);
   const cands = T.pois.filter(p => k.some(x => norm(p.n).includes(x)));
-  if(!cands.length) return null;
-  if(idx === 8){ return cands.find(p => p.t === "water") || cands.find(p => p.t === "view" && norm(p.n).includes("base")) || cands.find(p => p.t === "view") || null; }
-  return cands.find(p => p.t === "camp") || cands[0];
+  if(idx === 8){ const w = cands.filter(p => p.t === "water" || p.t === "view"); return w.length ? w : []; }
+  const camps = cands.filter(p => p.t === "camp");
+  return camps.length ? camps : cands;
 }
-function nearestNode(T, adj, p){ let best = null, bd = 1e9; for(const id of adj.keys()){ const q = T.nodes[id]; const d = (q[0]-p[0])**2 + ((q[1]-p[1])*0.63)**2; if(d < bd){ bd = d; best = id; } } return best; }
-function dijkstra(adj, s, t){
-  const dist = new Map([[s, 0]]), prev = new Map(), heap = [[0, s]];
+function nodesNear(T, adj, pts, rKm){
+  const out = new Map();
+  for(const id of adj.keys()){ const q = T.nodes[id]; for(const p of pts){ const d = hav(q, p); if(d <= rKm && (!out.has(id) || out.get(id) > d)) out.set(id, d); } }
+  return out;
+}
+function dijkstraMulti(adj, src, dst){
+  const dist = new Map(), prev = new Map(), heap = [];
   const push = x => { heap.push(x); let i = heap.length-1; while(i > 0){ const p = (i-1) >> 1; if(heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
   const pop = () => { const top = heap[0], last = heap.pop(); if(heap.length){ heap[0] = last; let i = 0; for(;;){ const l = 2*i+1, r = l+1; let m = i; if(l < heap.length && heap[l][0] < heap[m][0]) m = l; if(r < heap.length && heap[r][0] < heap[m][0]) m = r; if(m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
-  while(heap.length){ const [d, u] = pop(); if(u === t) break; if(d > (dist.get(u) ?? 1e9)) continue; for(const [v, w] of adj.get(u) || []){ const nd = d + w; if(nd < (dist.get(v) ?? 1e9)){ dist.set(v, nd); prev.set(v, u); push([nd, v]); } } }
-  if(!dist.has(t)) return null;
-  const path = [t]; let u = t; while(prev.has(u)){ u = prev.get(u); path.push(u); } return { path: path.reverse(), km: dist.get(t) };
+  src.forEach((d, id) => { dist.set(id, d); push([d, id]); });
+  let hit = null;
+  while(heap.length){ const [d, u] = pop(); if(d > (dist.get(u) ?? 1e9)) continue; if(dst.has(u)){ hit = u; break; }
+    for(const [v, w] of adj.get(u) || []){ const nd = d + w; if(nd < (dist.get(v) ?? 1e9)){ dist.set(v, nd); prev.set(v, u); push([nd, v]); } } }
+  if(hit == null) return null;
+  const path = [hit]; let u = hit; while(prev.has(u)){ u = prev.get(u); path.push(u); }
+  path.reverse(); const start = path[0];
+  return { path, km: dist.get(hit) - (src.get(start) || 0) };
 }
 const routeCache = {};
+function stagePts(T, i, which){
+  const k = which === "a" ? i : i + 1;
+  const pts = findPois(T, STAGE_PTS[k], k).map(p => [p.lat, p.lon]);
+  const x = (typeof STAGES !== "undefined" ? STAGES : [])[i] || {};
+  const g = geoCache[which === "a" ? x.a : x.b]; if(Array.isArray(g)) pts.push(g);
+  return pts;
+}
 function stageRouteFor(T, i){
   if(routeCache[i] !== undefined) return routeCache[i];
-  const a = findPoi(T, STAGE_PTS[i], i), b = findPoi(T, STAGE_PTS[i+1], i+1);
+  const A = stagePts(T, i, "a"), B = stagePts(T, i, "b");
   let res = null;
-  if(a && b){
-    const adj = buildGraph(T); const s = nearestNode(T, adj, [a.lat, a.lon]), t = nearestNode(T, adj, [b.lat, b.lon]);
-    const r = s && t ? dijkstra(adj, s, t) : null;
+  if(A.length && B.length){
+    const adj = buildGraph(T);
     const want = TREK[i] ? (i === 7 ? TREK[i].km / 2 : TREK[i].km) : 0;
-    if(r && r.km > want * 0.45 && r.km < want * 1.9){ res = { pts: r.path.map(id => T.nodes[id]), km: r.km, from: a.n, to: b.n }; }
+    for(const rad of [0.5, 1.2, 2.5]){
+      const src = nodesNear(T, adj, A, rad), dst = nodesNear(T, adj, B, rad);
+      src.forEach((d, id) => { if(dst.has(id)) dst.delete(id); });
+      if(!src.size || !dst.size) continue;
+      const r = dijkstraMulti(adj, src, dst);
+      if(r && r.km > want * 0.4 && r.km < want * 2.2){
+        const nm = k => { const p = findPois(T, STAGE_PTS[k], k)[0]; return p ? p.n : (k === i ? TREK[i].from : TREK[i].to); };
+        res = { pts: r.path.map(id => T.nodes[id]), km: r.km, from: nm(i), to: nm(i+1) }; break;
+      }
+    }
   }
   routeCache[i] = res; return res;
 }
@@ -547,6 +571,9 @@ async function runOffline(manual){
     let T = await loadTrail();
     if(!T || manual){ msg("Lade Wanderwege …"); T = await fetchTrail(); Object.keys(routeCache).forEach(k => delete routeCache[k]); }
     const P = profStore();
+    const SX = typeof STAGES !== "undefined" ? STAGES : [];
+    for(const x of SX){ for(const q of [x.a, x.b]) if(q && geoCache[q] === undefined){ await geoLookup(q, "tdp"); await new Promise(ok => setTimeout(ok, 400)); } }
+    Object.keys(routeCache).forEach(k => delete routeCache[k]);
     for(let i = 0; i < TREK.length; i++){ if(P[i] && !manual) continue; const r = stageRouteFor(T, i); if(r){ msg(`Höhenprofil ${i+1}/${TREK.length} …`); try{ await fetchProfile(i, r); }catch(e){} } }
     msg("Lade Wetter …"); try{ await fetchTrekWx(); }catch(e){}
     msg("Fertig."); renderStage();
