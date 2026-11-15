@@ -893,7 +893,8 @@ function packRow(key, label, extraId){
 const CURS = ["EUR","ARS","CLP","USD"];
 const CATS = ["Flüge","Unterkunft","Transport","Essen & Trinken","Touren & Eintritt","Ausrüstung","Sonstiges"];
 const eur = n => n.toLocaleString("de-DE",{style:"currency",currency:"EUR"});
-function toEur(c){ if(c.cur === "EUR") return c.amount; const r = Number(state.rates[c.cur]); return r > 0 ? c.amount / r : null; }
+function autoRate(cur){ const ref = fxRef && fxRef.rates && Number(fxRef.rates[cur]); if(ref > 0) return ref; const own = Number(state.rates[cur]); return own > 0 ? own : null; }
+function toEur(c){ if(c.cur === "EUR") return c.amount; if(typeof c.eur === "number") return c.eur; const r = autoRate(c.cur); return r ? c.amount / r : null; }
 function shareOf(c, who){ return c.split === "half" ? 0.5 : (c.split === who ? 1 : 0); }
 function costSummary(){
   let paidV=0, paidF=0, shareV=0, shareF=0, total=0, missing=0; const byCat={};
@@ -915,25 +916,22 @@ async function loadFx(){
   }catch(e){}
 }
 function fxRate(cur){
-  const own = Number(state.rates[cur]), ref = fxRef && fxRef.rates && Number(fxRef.rates[cur]);
-  const mode = fxMode || (own > 0 ? "own" : "ref");
-  if(mode === "own" && own > 0) return { r: own, src: "euer Tauschkurs" };
-  if(ref > 0) return { r: ref, src: "offizieller Kurs vom " + new Date(fxRef.at).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"}) };
-  if(own > 0) return { r: own, src: "euer Tauschkurs" };
+  const ref = fxRef && fxRef.rates && Number(fxRef.rates[cur]);
+  if(ref > 0) return { r: ref, src: "Tageskurs vom " + new Date(fxRef.at).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"}) };
+  const own = Number(state.rates[cur]); if(own > 0) return { r: own, src: "zuletzt gespeicherter Kurs" };
   return null;
 }
 const fmtNum = (n, d) => n.toLocaleString("de-DE", { maximumFractionDigits: d, minimumFractionDigits: d });
 function fxUpdate(){
   const out = $("#fxOut"), note = $("#fxNote"); if(!out) return;
   const amt = parseFloat(String($("#fxAmt").value).replace(/\./g,"").replace(",", ".")); const R = fxRate(fxCur);
-  if(!R){ out.textContent = "–"; note.textContent = "Noch kein Kurs: unten unter Wechselkurse euren Tauschkurs eintragen oder einmal mit Netz öffnen."; return; }
+  if(!R){ out.textContent = "–"; note.textContent = "Noch kein Kurs: einmal mit Netz öffnen, dann klappt es auch offline."; return; }
   out.textContent = isFinite(amt) ? fmtNum(amt / R.r, 2) + " €" : "–";
   note.textContent = `1 € = ${fmtNum(R.r, R.r < 10 ? 3 : 0)} ${fxCur} · ${R.src}` + (fxCur === "ARS" ? " · Wechselstuben und Kartenkurs können leicht abweichen" : "");
   const back = $("#fxBack"); if(back) back.innerHTML = [10, 50, 100].map(e => `<span class="chip grey">${e} € = ${fmtNum(e * R.r, 0)} ${esc(fxCur)}</span>`).join("");
 }
 function converterHtml(){
-  const own = Number(state.rates[fxCur]) > 0, ref = fxRef && fxRef.rates && fxRef.rates[fxCur];
-  return `<div class="card hl"><div class="sechead"><h3>Umrechner</h3>${own && ref ? `<div class="seg" role="group" aria-label="Kurs"><button type="button" data-fxm="own" aria-pressed="${(fxMode||"own") === "own"}">Unser Kurs</button><button type="button" data-fxm="ref" aria-pressed="${fxMode === "ref"}">Offiziell</button></div>` : ""}</div>
+  return `<div class="card hl"><div class="sechead"><h3>Umrechner</h3><span class="small muted">automatischer Tageskurs</span></div>
     <div class="conv">
       <input id="fxAmt" class="fxin" inputmode="decimal" autocomplete="off" value="${esc(fxAmt)}" aria-label="Betrag">
       <select id="fxSel" aria-label="Währung">${["ARS","CLP","USD"].map(k => `<option ${k === fxCur ? "selected" : ""}>${k}</option>`).join("")}</select>
@@ -960,7 +958,7 @@ function renderKosten(){
   const fmtAmt = c => `${c.amount.toLocaleString("de-DE",{maximumFractionDigits:2})} ${c.cur}`;
   v.innerHTML = `<div class="sechead"><h2>Kosten &amp; Abrechnung</h2><span class="small muted">Alles in Euro umgerechnet</span></div>
   ${converterHtml()}
-  <div class="card hl settle">${settle}${S.missing ? `<span class="chip warn" style="justify-self:center">${S.missing} Ausgabe(n) ohne Wechselkurs, unten Kurs eintragen</span>` : ""}</div>
+  <div class="card hl settle">${settle}${S.missing ? `<span class="chip warn" style="justify-self:center">${S.missing} Ausgabe(n) noch ohne Kurs: einmal mit Netz öffnen</span>` : ""}</div>
   <div class="stats">
     <div class="stat"><b class="money">${eur(S.total)}</b><span>Gesamt</span></div>
     <div class="stat"><b class="money">${eur(S.paidV)}</b><span>bezahlt von Victor · Anteil ${eur(S.shareV)}</span></div>
@@ -972,7 +970,8 @@ function renderKosten(){
       <label class="wide">Wofür?<input id="cWhat" required maxlength="100" value="${esc(f.what||"")}" placeholder="z. B. Abendessen Parrilla"></label>
       <label>Betrag<input id="cAmt" type="number" step="0.01" min="0" required inputmode="decimal" value="${esc(f.amount ?? "")}"></label>
       <label>Währung<select id="cCur">${CURS.map(c => `<option ${c === (f.cur||"EUR") ? "selected" : ""}>${c}</option>`).join("")}</select></label>
-      <label>Bezahlt von<select id="cPayer"><option value="victor">Victor</option><option value="felix">Felix</option></select></label>
+      <div class="wide small muted" id="cEur" aria-live="polite"></div>
+      <label>Bezahlt von<select id="cPayer"><option value="victor">Victor</option><option value="felix" ${/felix/.test(state.me||"") ? "selected" : ""}>Felix</option></select></label>
       <label>Aufteilung<select id="cSplit"><option value="half">50 / 50</option><option value="victor">nur Victor</option><option value="felix">nur Felix</option></select></label>
       <label>Kategorie<select id="cCat">${CATS.map(c => `<option ${c === f.cat ? "selected" : ""}>${c}</option>`).join("")}</select></label>
       <label>Datum<input id="cDate" type="date" value="${esc(f.date || new Date().toISOString().slice(0,10))}"></label>
@@ -986,17 +985,20 @@ function renderKosten(){
   </div>
   <div class="grid2">
     <div class="card"><h3>Nach Kategorie</h3><div class="catbars">${Object.entries(S.byCat).sort((a,b) => b[1]-a[1]).map(([k,val]) => `<div><span>${esc(k)}</span><i style="width:${Math.max(4,Math.round(val/maxCat*100))}%"></i><span class="money">${eur(val)}</span></div>`).join("") || '<p class="muted small">Noch nichts.</p>'}</div></div>
-    <div class="card"><h3>Wechselkurse</h3><p class="small muted" style="margin:0 0 8px">Wie viel bekommt ihr für 1 Euro? Tragt den Kurs ein, zu dem ihr tatsächlich tauscht. Alle Beträge rechnen sich dann neu.</p>
-      <form class="costform" id="rateForm">${["ARS","CLP","USD"].map(c => `<label>1 € = … ${c}<input type="number" step="any" min="0" id="r-${c}" value="${esc(state.rates[c] ?? "")}" ${state.canWrite ? "" : "readonly"}></label>`).join("")}
-      ${state.canWrite ? `<div class="wide"><button class="btn ghost" type="submit">Kurse speichern</button></div>` : ""}</form></div>
   </div>`;
   bindConverter(v); loadFx();
   v.querySelectorAll("[data-quick]").forEach(b => b.addEventListener("click", () => { costPrefill = QUICK[+b.dataset.quick]; renderKosten(); $("#cAmt").focus(); }));
   const cf = v.querySelector("#costForm");
   if(cf) cf.addEventListener("submit", async e => { e.preventDefault();
     const amount = parseFloat($("#cAmt").value); if(!(amount >= 0)) return;
-    const ok = await safeWrite(() => state.db.collection("kosten").add({what: $("#cWhat").value.trim(), amount, cur: $("#cCur").value, payer: $("#cPayer").value, split: $("#cSplit").value, cat: $("#cCat").value, date: $("#cDate").value, by: state.me, at: Date.now()}));
+    const cur = $("#cCur").value, R = cur === "EUR" ? null : autoRate(cur);
+    const fx = cur === "EUR" ? {} : R ? { eur: Math.round(amount / R * 100) / 100, rate: R, rateAt: (fxRef && fxRef.at) || Date.now() } : {};
+    const ok = await safeWrite(() => state.db.collection("kosten").add({...fx, what: $("#cWhat").value.trim(), amount, cur, payer: $("#cPayer").value, split: $("#cSplit").value, cat: $("#cCat").value, date: $("#cDate").value, by: state.me, at: Date.now()}));
     if(ok){ costPrefill = null; cf.reset(); $("#cMsg").textContent = "Gespeichert"; } });
+  if(cf){ const prev = () => { const a = parseFloat($("#cAmt").value), cur = $("#cCur").value, out = $("#cEur"); if(!out) return;
+      if(cur === "EUR" || !(a > 0)){ out.textContent = ""; return; } const R = autoRate(cur);
+      out.textContent = R ? `≈ ${eur(a / R)} (1 € = ${fmtNum(R, R < 10 ? 3 : 0)} ${cur}, wird so gespeichert)` : "Kein Kurs geladen: Betrag wird später automatisch umgerechnet."; };
+    $("#cAmt").addEventListener("input", prev); $("#cCur").addEventListener("change", prev); prev(); }
   const rf = v.querySelector("#rateForm");
   if(rf) rf.addEventListener("submit", async e => { e.preventDefault();
     const o = {}; ["ARS","CLP","USD"].forEach(c => { const n = parseFloat($("#r-"+c).value); if(n > 0) o[c] = n; });
@@ -1146,10 +1148,27 @@ function localApply(op){
   if(op.op === "set") ROWS[op.coll][op.id] = op.data; else delete ROWS[op.coll][op.id];
 }
 const uid = () => (crypto.randomUUID && crypto.randomUUID()) || ("x" + Date.now() + Math.random().toString(36).slice(2));
-let flushing = false;
+let flushing = false, syncErr = "", lastPull = ls.get("pat:last-pull") || 0;
+const FAILED_KEY = "pat:cockpit-failed";
+const isAuthErr = e => e && (e.status === 401 || e.status === 403 || /jwt|token|expired|row-level security|permission denied/i.test(e.message || "") || e.code === "42501" || e.code === "PGRST301" || e.code === "PGRST303");
+const isPermErr = e => e && /^(22|23)/.test(String(e.code || ""));
+let refreshedAt = 0;
+async function ensureSession(force){
+  try{
+    if(force || Date.now() - refreshedAt > 60e3){
+      const { data } = await SBC.auth.getSession();
+      const exp = data && data.session && data.session.expires_at ? data.session.expires_at * 1000 : 0;
+      if(force || !exp || exp - Date.now() < 120e3){ const r = await SBC.auth.refreshSession(); if(r.error) return false; }
+      refreshedAt = Date.now();
+    }
+    return true;
+  }catch(e){ return false; }
+}
 async function flushOps(){
   if(flushing || !OPS.length || navigator.onLine === false) { updateSync(); return; }
   flushing = true;
+  await ensureSession(false);
+  let retried = false;
   while(OPS.length){
     const op = OPS[0];
     try{
@@ -1157,8 +1176,14 @@ async function flushOps(){
         ? SBC.from("cockpit_items").upsert({ coll: op.coll, id: op.id, data: op.data })
         : SBC.from("cockpit_items").delete().eq("coll", op.coll).eq("id", op.id);
       const { error } = await q; if(error) throw error;
-      OPS.shift(); ls.set(OPS_KEY, OPS);
-    }catch(e){ console.warn(e); break; }
+      OPS.shift(); ls.set(OPS_KEY, OPS); syncErr = "";
+    }catch(e){
+      console.warn(e);
+      if(isAuthErr(e) && !retried){ retried = true; if(await ensureSession(true)) continue; }
+      if(isAuthErr(e)){ syncErr = "Anmeldung abgelaufen: bitte unter Orga ab- und wieder anmelden. Eure Einträge bleiben gespeichert."; break; }
+      if(isPermErr(e)){ const f = ls.get(FAILED_KEY) || []; f.push({ op, err: e.message, at: Date.now() }); ls.set(FAILED_KEY, f); OPS.shift(); ls.set(OPS_KEY, OPS); syncErr = "Ein Eintrag konnte nicht gespeichert werden und wurde zurückgestellt."; continue; }
+      syncErr = "Senden hat nicht geklappt" + (e && e.message ? ": " + e.message : "") + ". Neuer Versuch gleich automatisch."; break;
+    }
   }
   flushing = false; updateSync();
 }
@@ -1187,21 +1212,39 @@ async function signPaths(paths){
 }
 function blobUrl(id){ return signed[id] || "#"; }
 function updateSync(){
-  const off = navigator.onLine === false;
+  const off = navigator.onLine === false, el = $("#sync"); if(!el) return;
   $("#offline").hidden = !off;
-  $("#sync").textContent = off ? "Offline · zuletzt geladener Stand" : OPS.length ? `${OPS.length} Änderung(en) warten auf Netz …` : "Verbunden · Änderungen sieht der andere beim nächsten Laden";
+  const t = lastPull ? new Date(lastPull).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}) : "–";
+  const txt = syncErr ? "⚠️ " + syncErr
+    : off ? `Offline · Stand ${t}${OPS.length ? ` · ${OPS.length} Änderung(en) warten auf Netz` : ""}`
+    : OPS.length ? `${OPS.length} Änderung(en) werden gesendet …` : `Synchronisiert ${t}`;
+  el.innerHTML = `${esc(txt)} <button type="button" class="copy" id="syncNow">Jetzt abgleichen</button>`;
+  el.classList.toggle("err", !!syncErr);
+  $("#syncNow").addEventListener("click", async () => { syncErr = ""; el.firstChild.textContent = "Gleiche ab … "; await ensureSession(true); await flushOps(); await pull(); });
 }
 async function pull(){
   if(navigator.onLine === false) return;
-  const { data, error } = await SBC.from("cockpit_items").select("coll,id,data").limit(5000);
-  if(error){ console.warn(error); return; }
-  const fresh = {}; (data||[]).forEach(r => { (fresh[r.coll] = fresh[r.coll] || {})[r.id] = r.data; });
+  await ensureSession(false);
+  const all = []; let from = 0, err = null;
+  for(let round = 0; round < 2; round++){
+    all.length = 0; from = 0; err = null;
+    while(true){
+      const { data, error } = await SBC.from("cockpit_items").select("coll,id,data").order("coll").order("id").range(from, from + 999);
+      if(error){ err = error; break; }
+      all.push(...(data || [])); if(!data || data.length < 1000) break; from += 1000;
+    }
+    if(!err) break;
+    if(!isAuthErr(err) || !(await ensureSession(true))) break;
+  }
+  if(err){ console.warn(err); syncErr = isAuthErr(err) ? "Anmeldung abgelaufen: bitte unter Orga ab- und wieder anmelden. Eure Einträge bleiben gespeichert." : "Laden hat nicht geklappt, neuer Versuch gleich automatisch."; updateSync(); return; }
+  const fresh = {}; all.forEach(r => { (fresh[r.coll] = fresh[r.coll] || {})[r.id] = r.data; });
   ROWS = fresh; OPS.forEach(localApply);   // eigene, noch nicht gesendete Änderungen behalten
   ls.set(CACHE_KEY, ROWS);
+  if(!OPS.length) syncErr = ""; lastPull = Date.now(); ls.set("pat:last-pull", lastPull);
   if(Date.now() - signedAt > 90*60*1000){ signed = {}; signedAt = Date.now(); }
   const paths = Object.values(ROWS.uploads || {}).flatMap(u => (u.files||[]).map(f => f.id));
   await signPaths(paths);
-  rowsToState(); queueRender();
+  rowsToState(); queueRender(); updateSync();
 }
 async function loadWeatherOM(){
   if(navigator.onLine === false) return;
@@ -1237,22 +1280,27 @@ function queueRender(){ if(renderQueued) return; renderQueued = true; requestAni
   if(!SBC){ showGate("Die Datenbank ist nicht eingerichtet."); return; }
   const cache = ls.get(CACHE_KEY);
   const { data: { session } } = await SBC.auth.getSession();
-  if(!session){ ls.del(CACHE_KEY); ls.del(OPS_KEY); showGate("Du bist in diesem Browser noch nicht angemeldet."); return; }
+  if(!session){ showGate(OPS.length ? `Du bist nicht mehr angemeldet. ${OPS.length} Eintrag/Einträge sind auf diesem Gerät gespeichert und werden nach dem Anmelden gesendet.` : "Du bist in diesem Browser noch nicht angemeldet."); return; }
   state.me = (session.user.email || "").toLowerCase();
+  const owner = ls.get("pat:ops-owner");
+  if(owner && owner !== state.me){ OPS = []; ls.set(OPS_KEY, OPS); ls.del(CACHE_KEY); }
+  ls.set("pat:ops-owner", state.me);
   state.db = dbAdapter; state.assets = assetsAdapter; state.canWrite = true;
   if(cache){ ROWS = cache; OPS.forEach(localApply); rowsToState(); }
   state.wx = ls.get("pat:cockpit-wx");
   renderCount(); route(); updateSync();
   if(navigator.onLine !== false){
-    const { data: ok } = await SBC.rpc("is_editor");
-    if(!ok){ showGate("Angemeldet, aber diese Adresse steht nicht in der Redaktionsliste oder ist noch nicht bestätigt.", state.me); return; }
+    await ensureSession(false);
+    const { data: ok, error: rpcErr } = await SBC.rpc("is_editor");
+    if(rpcErr){ syncErr = "Verbindung zur Datenbank klappt gerade nicht."; updateSync(); }
+    else if(!ok){ showGate("Angemeldet, aber diese Adresse steht nicht in der Redaktionsliste oder ist noch nicht bestätigt.", state.me); return; }
   }
   await flushOps(); await pull(); loadWeatherOM();
   window.addEventListener("online", async () => { updateSync(); await flushOps(); await pull(); });
   window.addEventListener("offline", updateSync);
   document.addEventListener("visibilitychange", async () => { if(document.visibilityState === "visible"){ await flushOps(); await pull(); } });
   setInterval(async () => { if(document.visibilityState !== "visible") return; const a = document.activeElement; if(a && a.matches("input,textarea,select")) return; await flushOps(); await pull(); }, 30000);
-  SBC.auth.onAuthStateChange(ev => { if(ev === "SIGNED_OUT"){ ls.del(CACHE_KEY); ls.del(OPS_KEY); location.reload(); } });
+  SBC.auth.onAuthStateChange(ev => { if(ev === "SIGNED_OUT"){ location.reload(); } });
 })();
 
 })();
