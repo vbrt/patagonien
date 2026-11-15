@@ -1180,7 +1180,7 @@ async function flushOps(){
     }catch(e){
       console.warn(e);
       if(isAuthErr(e) && !retried){ retried = true; if(await ensureSession(true)) continue; }
-      if(isAuthErr(e)){ syncErr = "Anmeldung abgelaufen: bitte unter Orga ab- und wieder anmelden. Eure Einträge bleiben gespeichert."; break; }
+      if(isAuthErr(e)){ syncErr = "Anmeldung abgelaufen. Bitte neu anmelden, eure Einträge bleiben auf dem Gerät gespeichert."; break; }
       if(isPermErr(e)){ const f = ls.get(FAILED_KEY) || []; f.push({ op, err: e.message, at: Date.now() }); ls.set(FAILED_KEY, f); OPS.shift(); ls.set(OPS_KEY, OPS); syncErr = "Ein Eintrag konnte nicht gespeichert werden und wurde zurückgestellt."; continue; }
       syncErr = "Senden hat nicht geklappt" + (e && e.message ? ": " + e.message : "") + ". Neuer Versuch gleich automatisch."; break;
     }
@@ -1218,7 +1218,8 @@ function updateSync(){
   const txt = syncErr ? "⚠️ " + syncErr
     : off ? `Offline · Stand ${t}${OPS.length ? ` · ${OPS.length} Änderung(en) warten auf Netz` : ""}`
     : OPS.length ? `${OPS.length} Änderung(en) werden gesendet …` : `Synchronisiert ${t}`;
-  el.innerHTML = `${esc(txt)} <button type="button" class="copy" id="syncNow">Jetzt abgleichen</button>`;
+  el.innerHTML = `${esc(txt)} <button type="button" class="copy" id="syncNow">Jetzt abgleichen</button>${/Anmeldung/.test(syncErr) ? ' <button type="button" class="copy" id="reLogin">Neu anmelden</button>' : ""}`;
+  const rl = $("#reLogin"); if(rl) rl.addEventListener("click", async () => { try{ await SBC.auth.signOut({ scope: "local" }); }catch(e){} location.reload(); });
   el.classList.toggle("err", !!syncErr);
   $("#syncNow").addEventListener("click", async () => { syncErr = ""; el.firstChild.textContent = "Gleiche ab … "; await ensureSession(true); await flushOps(); await pull(); });
 }
@@ -1236,7 +1237,7 @@ async function pull(){
     if(!err) break;
     if(!isAuthErr(err) || !(await ensureSession(true))) break;
   }
-  if(err){ console.warn(err); syncErr = isAuthErr(err) ? "Anmeldung abgelaufen: bitte unter Orga ab- und wieder anmelden. Eure Einträge bleiben gespeichert." : "Laden hat nicht geklappt, neuer Versuch gleich automatisch."; updateSync(); return; }
+  if(err){ console.warn(err); syncErr = isAuthErr(err) ? "Anmeldung abgelaufen. Bitte neu anmelden, eure Einträge bleiben auf dem Gerät gespeichert." : "Laden hat nicht geklappt, neuer Versuch gleich automatisch."; updateSync(); return; }
   const fresh = {}; all.forEach(r => { (fresh[r.coll] = fresh[r.coll] || {})[r.id] = r.data; });
   ROWS = fresh; OPS.forEach(localApply);   // eigene, noch nicht gesendete Änderungen behalten
   ls.set(CACHE_KEY, ROWS);
