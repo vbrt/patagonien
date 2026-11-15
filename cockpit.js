@@ -1218,7 +1218,8 @@ function updateSync(){
   const txt = syncErr ? "⚠️ " + syncErr
     : off ? `Offline · Stand ${t}${OPS.length ? ` · ${OPS.length} Änderung(en) warten auf Netz` : ""}`
     : OPS.length ? `${OPS.length} Änderung(en) werden gesendet …` : `Synchronisiert ${t}`;
-  el.innerHTML = `${esc(txt)} <button type="button" class="copy" id="syncNow">Jetzt abgleichen</button>${/Anmeldung/.test(syncErr) ? ' <button type="button" class="copy" id="reLogin">Neu anmelden</button>' : ""}`;
+  el.innerHTML = `${esc(txt)} <button type="button" class="copy" id="syncNow">Jetzt abgleichen</button>${/Anmeldung/.test(syncErr) ? ' <button type="button" class="copy" id="reLogin">Neu anmelden</button>' : ""}${(ls.get(FAILED_KEY) || []).length ? ` <button type="button" class="copy" id="retryFailed">${(ls.get(FAILED_KEY) || []).length} zurückgestellte erneut senden</button>` : ""}`;
+  const rf = $("#retryFailed"); if(rf) rf.addEventListener("click", async () => { const f = ls.get(FAILED_KEY) || []; ls.del(FAILED_KEY); f.forEach(x => OPS.push(x.op)); ls.set(OPS_KEY, OPS); syncErr = ""; await flushOps(); await pull(); });
   const rl = $("#reLogin"); if(rl) rl.addEventListener("click", async () => { try{ await SBC.auth.signOut({ scope: "local" }); }catch(e){} location.reload(); });
   el.classList.toggle("err", !!syncErr);
   $("#syncNow").addEventListener("click", async () => { syncErr = ""; el.firstChild.textContent = "Gleiche ab … "; await ensureSession(true); await flushOps(); await pull(); });

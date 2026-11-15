@@ -32,3 +32,25 @@ const PLACEINFO = [
  {k:"tdp",nm:"Torres del Paine",when:"18.–26.11. · Chile",p:"Ein Nationalpark in Chile mit Granittürmen, Gletschern und Seen in unwirklichen Farben. Die beiden umrunden das ganze Bergmassiv zu Fuß, rund 115 Kilometer in 8 Tagen, und schlafen in Berghütten und Zelten. Handyempfang gibt es kaum.",f:"Im Park leben Guanakos, die wilden Verwandten der Lamas, dazu Kondore und sogar Pumas. Der Wind kann so stark sein, dass man sich dagegenlehnen muss."}
 ];
 const WXLOC = [{key:"ba",name:"Buenos Aires",lat:-34.60,lon:-58.38},{key:"ush",name:"Ushuaia",lat:-54.80,lon:-68.30},{key:"cal",name:"El Calafate",lat:-50.34,lon:-72.27},{key:"tdp",name:"Torres del Paine",lat:-51.0,lon:-73.0}];
+
+// Öffentlicher Tagesplan für Familie & Freunde (bewusst ohne Buchungscodes, Adressen und Unterkünfte)
+const PLAN = [
+ {d:"2026-11-13",t:"Abflug",w:"Frankfurt → Buenos Aires",s:["Abends Nachtflug, rund 14 Stunden über den Atlantik"]},
+ {d:"2026-11-14",t:"Ankunft & Weiterflug",w:"Buenos Aires → Ushuaia",s:["Früh morgens Landung in Buenos Aires","Quer durch die Stadt zum Inlandsflughafen","Nachmittags Landung in Ushuaia, der südlichsten Stadt der Welt"]},
+ {d:"2026-11-15",t:"Beagle-Kanal & Stadt",w:"Ushuaia",s:["Bootstour auf dem Beagle-Kanal, etwa 6 Stunden: Seelöwen, Kormorane und der rot-weiße Leuchtturm Les Éclaireurs","Nachmittags Bummel durch die Stadt, Kaffee und Schokolade","Abends Königskrabbe (Centolla), die Spezialität hier"]},
+ {d:"2026-11-16",t:"Nationalpark Feuerland",w:"Ushuaia",s:["Wanderung an der Küste entlang durch den Nationalpark Tierra del Fuego, etwa 8 km","Ziel: Bahía Lapataia, wo die Ruta 3 endet. Das berühmte Schild am Ende der Straße","Abends Rucksäcke packen"]},
+ {d:"2026-11-17",t:"Perito-Moreno-Gletscher",w:"Ushuaia → El Calafate",s:["Morgens Flug nach El Calafate","Ausflug zum Perito-Moreno-Gletscher: eine Eiswand, die direkt in den See abbricht","Abends Spaziergang zu den Flamingos an der Lagune"]},
+ {d:"2026-11-18",t:"Über die Grenze, Start der Wanderung",w:"El Calafate → Torres del Paine (Chile)",s:["Ganz früh mit dem Auto über die Grenze nach Chile","Erster Wandertag: 13 km durch die Pampa, eher flach","Ab hier kaum Handyempfang bis zum 26.11."]},
+ {d:"2026-11-19",t:"Rückseite des Massivs",w:"Torres del Paine",s:["18 km, etwa 6 Stunden, mit Blick auf den Lago Paine","Oft sehr windig","Nacht in einer Berghütte am Dickson-See"]},
+ {d:"2026-11-20",t:"Durch den Märchenwald",w:"Torres del Paine",s:["11 km stetig bergauf durch dichten Wald","Ankunft an einem Gletschersee","Früh schlafen: morgen kommt der schwerste Tag"]},
+ {d:"2026-11-21",t:"Königsetappe über den Pass",w:"Torres del Paine",s:["Sehr früher Start","Über den Paso John Gardner, gut 1.200 m hoch, oft mit Schnee und Sturm","Oben der Blick auf das riesige Patagonische Eisfeld und den Grey-Gletscher","Langer Abstieg, 8 bis 10 Stunden unterwegs"]},
+ {d:"2026-11-22",t:"Am Gletschersee entlang",w:"Torres del Paine",s:["Entspannte 11 km am Lago Grey mit Eisbergen im Wasser","Erholung nach dem Pass"]},
+ {d:"2026-11-23",t:"Valle del Francés",w:"Torres del Paine",s:["Abstecher ins Französische Tal mit Hängegletscher, man hört die Lawinen krachen","Weiter zur Hütte an den Cuernos, den 'Hörnern' aus Granit"]},
+ {d:"2026-11-24",t:"Am türkisen See",w:"Torres del Paine",s:["11 km am Lago Nordenskjöld entlang","Endlich wieder eine warme Dusche"]},
+ {d:"2026-11-25",t:"Das Finale: Base Las Torres",w:"Torres del Paine",s:["Aufstieg zu den drei berühmten Granittürmen über dem Gletschersee","Rund 19 km hin und zurück, das Ziel der ganzen Runde"]},
+ {d:"2026-11-26",t:"Zurück nach Argentinien",w:"Torres del Paine → Buenos Aires",s:["Mit dem Auto zurück über die Grenze","Nachmittags Flug nach Buenos Aires","Ab heute wieder Netz und hoffentlich viele Fotos"]},
+ {d:"2026-11-27",t:"Buenos Aires",w:"Buenos Aires",s:["Recoleta mit dem berühmten Friedhof","Bummel durch Palermo mit kleinen Designläden","Abends ein echtes argentinisches Steak"]},
+ {d:"2026-11-28",t:"Buenos Aires",w:"Buenos Aires",s:["Führung durch den Palacio Barolo, gebaut nach Dantes Göttlicher Komödie","Mittagessen in einem Geheimtipp-Restaurant","Abends Abschlussessen mit Freunden und Tango"]},
+ {d:"2026-11-29",t:"Flohmarkt & Heimflug",w:"Buenos Aires → Frankfurt",s:["Vormittags Antiquitätenmarkt in San Telmo","Nachmittags Rückflug über Nacht"]},
+ {d:"2026-11-30",t:"Wieder zu Hause",w:"Frankfurt",s:["Mittags Landung in Frankfurt"]}
+];

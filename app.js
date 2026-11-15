@@ -61,6 +61,17 @@ function loginErrorText(error){
 }
 window.loginErrorText = loginErrorText;
 /* ---------- Render ---------- */
+function planHtml(){
+  if(typeof PLAN === "undefined") return "";
+  const local = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" }));
+  const iso = `${local.getFullYear()}-${String(local.getMonth()+1).padStart(2,"0")}-${String(local.getDate()).padStart(2,"0")}`;
+  const fmt = d => new Date(d + "T12:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "numeric" });
+  const ti = PLAN.findIndex(p => p.d === iso);
+  const day = (p, open) => `<details class="planday${p.d === iso ? " today" : p.d < iso ? " past" : ""}"${open ? " open" : ""}><summary><span class="pd">${esc(fmt(p.d))}</span><b>${esc(p.t)}</b>${p.d === iso ? '<span class="tag">Heute</span>' : ""}<span class="pw">${esc(p.w)}</span></summary><ul>${p.s.map(x => `<li>${esc(x)}</li>`).join("")}</ul></details>`;
+  const head = ti >= 0 ? `<p class="small muted" style="margin:2px 0 8px">Heute und morgen, dazu der ganze Plan zum Aufklappen. Ortszeit Argentinien.</p>${day(PLAN[ti], true)}${PLAN[ti+1] ? day(PLAN[ti+1], false) : ""}` : `<p class="small muted" style="margin:2px 0 8px">Tag für Tag zum Aufklappen.</p>`;
+  return `<section class="card" aria-labelledby="h-plan"><h2 id="h-plan">Was wir ${ti >= 0 ? "heute" : "vorhaben"} machen</h2>${head}
+    <details class="planall"${ti < 0 ? " open" : ""}><summary>Der ganze Reiseplan (${PLAN.length} Tage)</summary>${PLAN.map(p => day(p, false)).join("")}</details></section>`;
+}
 function render(){
   if(MODE === "studio") return renderStudioOnly();
   const si = stopIndex();
@@ -83,6 +94,7 @@ function render(){
       <ol class="route">${STOPS.map((s,i) => `<li class="${i < si ? "done" : i === si ? "now" : ""}"><span class="pin" aria-hidden="true"></span><div><div class="nm">${esc(s.nm)}${i === si ? '<span class="tag">Hier sind wir</span>' : ""}${s.tag && i !== si ? `<span class="tag">${esc(s.tag)}</span>` : ""}</div><div class="ds">${esc(s.ds)}</div></div><span class="dt">${s.dt}</span></li>`).join("")}</ol>
       <p class="small muted" style="margin:4px 0 0">Vom 18. bis 26.11. sind wir im Nationalpark und haben kaum Empfang. Keine Nachricht ist dann eine gute Nachricht.</p>
     </section>
+    ${planHtml()}
     <section aria-labelledby="h-feed" style="display:grid;gap:16px"><h2 id="h-feed">Neues von unterwegs</h2>
       ${S.loading ? '<p class="muted">Lädt …</p>' : S.posts.length ? S.posts.map(postHtml).join("") : `<div class="card empty"><h3 style="font-size:1.5rem">Bald geht's los</h3><p class="muted" style="margin:6px 0 0">Am 13.11. heben wir ab. Die ersten Fotos kommen aus Ushuaia.</p></div>`}
     </section>
