@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&amp;family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&amp;family=Source+Sans+3:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@500&amp;display=swap" rel="stylesheet">
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css?v=1.9.4">
-<link rel="stylesheet" href="style.css?v=22">
+<link rel="stylesheet" href="style.css?v=23">
 <style>
 :root{
   /* Layout: Kopf mit Countdown, Tab-Leiste wie Wegweiser, darunter je Bereich Karten in einer Spalte (max 860px) */
@@ -87,13 +87,21 @@ nav.tabs{top:0;padding-top:env(safe-area-inset-top)}
 .spot:last-child{border-bottom:0}
 .spot .dot{width:12px;height:12px;border-radius:50%;margin-top:6px}
 .spot .dot.mine{box-shadow:0 0 0 2px var(--ink)}
+.starts{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0 8px}
+.starts button{border:1px solid var(--line);background:transparent;border-radius:999px;padding:4px 10px;font:inherit;font-size:.85rem;cursor:pointer}
+.starts button[aria-pressed=true]{background:var(--ink);color:var(--bg,#fff);border-color:var(--ink)}
+.starts button.rec{font-weight:700}
+.wxlegend{display:flex;flex-wrap:wrap;gap:4px 12px;color:var(--muted);margin:2px 0 4px}
+.wxlegend i{display:inline-block;width:12px;height:8px;border-radius:2px;margin-right:4px;vertical-align:middle}
+.wxsegs{list-style:none;margin:8px 0 0;padding:0}.wxsegs li{margin:3px 0}.skyico{display:inline-block;width:1.4em}
 .wxtips{margin:8px 0 0 1.1em;padding:0}.wxtips li{margin:4px 0}
 .wxhours{margin-top:8px}.wxhours summary{cursor:pointer;font-weight:600}
 .hourtable{display:grid;gap:0;margin-top:6px;font-variant-numeric:tabular-nums}
-.hourtable .hr{display:grid;grid-template-columns:2.4em 1.8em 2.8em 3.6em 1fr 3em;gap:6px;padding:4px 0;border-top:1px solid var(--line);align-items:baseline}
+.hourtable .hr{display:grid;grid-template-columns:1.8em 1fr 1.6em 3.4em 4.2em 2.4em;gap:6px;padding:4px 0;border-top:1px solid var(--line);align-items:baseline}
 .hourtable .hr.head{font-size:.75rem;color:var(--muted);border-top:0}
 .hourtable .warn{color:var(--trail);font-weight:700}.hourtable .red{color:var(--crit);font-weight:700}
-.hourtable small{color:var(--muted)}
+.hourtable small{color:var(--muted);display:block;font-size:.72rem;line-height:1.1}
+.hourtable .hr>span{white-space:nowrap}
 .sync.err{color:var(--crit);font-weight:600}
 .sync .copy{margin-left:6px}
 .row-gps{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0}
@@ -371,11 +379,11 @@ footer{padding:20px 0 40px;font-size:.8rem;color:var(--muted)}
 <script src="cockpit-flags.js"></script>
 <script src="vendor/supabase.js?v=2.45.4"></script>
 <script src="vendor/leaflet/leaflet.js?v=1.9.4"></script>
-<script src="config.js?v=22"></script>
-<script src="data.js?v=22"></script>
-<script src="tipps.js?v=22"></script>
-<script src="trek-etappen.js?v=22"></script>
-<script src="app.js?v=22"></script>
-<script src="cockpit.js?v=22"></script>
+<script src="config.js?v=23"></script>
+<script src="data.js?v=23"></script>
+<script src="tipps.js?v=23"></script>
+<script src="trek-etappen.js?v=23"></script>
+<script src="app.js?v=23"></script>
+<script src="cockpit.js?v=23"></script>
 </body>
 </html>
