@@ -494,38 +494,90 @@ async function renderProfile(i, r){
   </svg>`;
 }
 /* Wetter pro Etappe: Open-Meteo, Höchster Punkt bzw. Ziel, gespeichert für offline */
-const TWX_KEY = "pat:trekwx-v1";
+const TWX_KEY = "pat:trekwx-v2";
 function stageISO(i){ const [d,m] = TREK[i].d.split("."); return `2026-${m.padStart(2,"0")}-${d.padStart(2,"0")}`; }
 function stagePoint(i){
   const p = profStore()[i]; if(p){ const k = p.e.indexOf(Math.max(...p.e)); return { lat: p.pts[k][0], lon: p.pts[k][1], ele: p.e[k], hi: true }; }
-  const r = trailData ? stageRouteFor(trailData, i) : null; if(r){ const q = r.pts[r.pts.length-1]; return { lat: q[0], lon: q[1] }; }
+  const r = trailData ? stageRouteFor(trailData, i) : null; if(r){ const q = r.pts[Math.floor(r.pts.length/2)]; return { lat: q[0], lon: q[1] }; }
   return { lat: -51.0, lon: -73.0 };
 }
+function stageEnd(i){
+  const p = profStore()[i]; if(p){ const k = i === 7 ? 0 : p.pts.length - 1; return { lat: p.pts[k][0], lon: p.pts[k][1], ele: p.e[k] }; }
+  const r = trailData ? stageRouteFor(trailData, i) : null; if(r){ const q = i === 7 ? r.pts[0] : r.pts[r.pts.length-1]; return { lat: q[0], lon: q[1] }; }
+  return { lat: -51.0, lon: -73.0 };
+}
+const HV = "temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,wind_speed_10m,wind_gusts_10m,cloud_cover,snowfall";
 async function fetchTrekWx(){
-  const P = TREK.map((_, i) => stagePoint(i));
+  const P = [...TREK.map((_, i) => stagePoint(i)), ...TREK.map((_, i) => stageEnd(i))];
   const ele = P.every(p => p.ele != null) ? "&elevation=" + P.map(p => p.ele).join(",") : "";
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${P.map(p => p.lat.toFixed(4)).join(",")}&longitude=${P.map(p => p.lon.toFixed(4)).join(",")}${ele}&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max&hourly=wind_gusts_10m,temperature_2m&wind_speed_unit=kmh&timezone=America%2FSantiago&forecast_days=16`;
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${P.map(p => p.lat.toFixed(4)).join(",")}&longitude=${P.map(p => p.lon.toFixed(4)).join(",")}${ele}&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,sunrise,sunset,uv_index_max&hourly=${HV}&wind_speed_unit=kmh&timezone=America%2FSantiago&forecast_days=16`;
   const res = await fetch(url); if(!res.ok) throw new Error("wx"); const j = await res.json(); const arr = Array.isArray(j) ? j : [j];
-  const out = { at: Date.now(), st: {} };
-  TREK.forEach((_, i) => { const x = arr[i], iso = stageISO(i); if(!x || !x.daily) return; const k = x.daily.time.indexOf(iso); if(k < 0) return;
-    const hrs = []; (x.hourly.time || []).forEach((t, h) => { if(t.startsWith(iso)){ const hh = +t.slice(11,13); if(hh >= 6 && hh <= 18 && hh % 2 === 0) hrs.push([hh, Math.round(x.hourly.wind_gusts_10m[h]), Math.round(x.hourly.temperature_2m[h])]); } });
-    out.st[i] = { code: x.daily.weather_code[k], hi: Math.round(x.daily.temperature_2m_max[k]), lo: Math.round(x.daily.temperature_2m_min[k]), rain: Math.round(x.daily.precipitation_sum[k]*10)/10, wind: Math.round(x.daily.wind_speed_10m_max[k]), gust: Math.round(x.daily.wind_gusts_10m_max[k]), hrs, high: !!P[i].hi, ele: P[i].ele }; });
+  const N = TREK.length, out = { at: Date.now(), st: {} };
+  const pick = (x, iso) => { if(!x || !x.daily) return null; const k = x.daily.time.indexOf(iso); if(k < 0) return null;
+    const H = x.hourly, hrs = [];
+    (H.time || []).forEach((t, h) => { if(t.startsWith(iso)){ const hh = +t.slice(11,13); if(hh >= 5 && hh <= 22) hrs.push([hh, Math.round(H.temperature_2m[h]), Math.round(H.apparent_temperature[h]), H.precipitation_probability[h] ?? null, Math.round((H.precipitation[h]||0)*10)/10, H.weather_code[h], Math.round(H.wind_speed_10m[h]), Math.round(H.wind_gusts_10m[h]), H.cloud_cover[h], Math.round((H.snowfall[h]||0)*10)/10]); } });
+    const D = x.daily;
+    return { code: D.weather_code[k], hi: Math.round(D.temperature_2m_max[k]), lo: Math.round(D.temperature_2m_min[k]), rain: Math.round(D.precipitation_sum[k]*10)/10, pp: D.precipitation_probability_max ? D.precipitation_probability_max[k] : null, wind: Math.round(D.wind_speed_10m_max[k]), gust: Math.round(D.wind_gusts_10m_max[k]), rise: (D.sunrise[k]||"").slice(11,16), set: (D.sunset[k]||"").slice(11,16), uv: D.uv_index_max ? Math.round(D.uv_index_max[k]) : null, hrs }; };
+  TREK.forEach((_, i) => { const iso = stageISO(i); const a = pick(arr[i], iso), b = pick(arr[N + i], iso); if(!a) return;
+    out.st[i] = { ...a, high: !!P[i].hi, ele: P[i].ele, end: b ? { lo: b.lo, hi: b.hi, eve: (b.hrs.find(h => h[0] === 20) || [])[1], night: b.lo, gust: b.gust, ele: P[N+i].ele } : null }; });
   try{ localStorage.setItem(TWX_KEY, JSON.stringify(out)); }catch(e){}
   return out;
 }
 function trekWx(){ try{ return JSON.parse(localStorage.getItem(TWX_KEY)); }catch(e){ return null; } }
+const WI = {0:["☀️","Klar"],1:["🌤️","Überwiegend klar"],2:["⛅","Teils bewölkt"],3:["☁️","Bedeckt"],45:["🌫️","Nebel"],48:["🌫️","Nebel"],51:["🌦️","Niesel"],53:["🌦️","Niesel"],55:["🌧️","Niesel"],56:["🌧️","Gefrierender Niesel"],57:["🌧️","Gefrierender Niesel"],61:["🌧️","Leichter Regen"],63:["🌧️","Regen"],65:["🌧️","Starker Regen"],66:["🌧️","Gefrierender Regen"],67:["🌧️","Gefrierender Regen"],71:["🌨️","Leichter Schnee"],73:["🌨️","Schnee"],75:["❄️","Starker Schnee"],77:["🌨️","Schneegriesel"],80:["🌦️","Schauer"],81:["🌧️","Schauer"],82:["⛈️","Heftige Schauer"],85:["🌨️","Schneeschauer"],86:["❄️","Schneeschauer"],95:["⛈️","Gewitter"],96:["⛈️","Gewitter"],99:["⛈️","Gewitter"]};
+function stageHours(i){ const t = String(TREK[i].h).replace(",", "."); const nums = t.match(/[\d.]+/g) || ["6"]; return Math.ceil(Math.max(...nums.map(Number))); }
+/* Bestes Startfenster: Böen, Regen und Kälte während der Gehzeit möglichst gering, Ankunft vor Sonnenuntergang */
+function bestStart(d, i){
+  const dur = stageHours(i), setH = d.set ? +d.set.slice(0,2) : 21, H = new Map(d.hrs.map(h => [h[0], h]));
+  const cand = [];
+  for(let s = 5; s <= 11; s++){
+    if(s + dur > setH) continue; let score = 0, n = 0, maxG = 0, wet = 0;
+    for(let h = s; h < s + dur; h++){ const x = H.get(h); if(!x) continue; n++;
+      const g = x[7], pp = x[3] ?? 0, pr = x[4], ap = x[2];
+      score += Math.max(0, g - 40) * 1.2 + pp * 0.25 + pr * 6 + Math.max(0, 2 - ap) * 2; maxG = Math.max(maxG, g); if(pp >= 50 || pr >= 0.5) wet++; }
+    if(n) cand.push({ s, score: score / n + (s <= 6 ? 1.5 : 0), maxG, wet, end: s + dur });
+  }
+  if(i === 3) cand.forEach(c => { if(c.s > 7) c.score += 40; });      // Pass: Ranger wollen Start bis spätestens 7 Uhr
+  if(i === 7) cand.forEach(c => { if(c.s > 9) c.score += 40; });      // Base Torres: Cut-off-Zeit für den Aufstieg
+  cand.sort((a, b) => a.score - b.score);
+  return cand[0] || null;
+}
+function wxAdvice(d, i){
+  const tips = [], hrs = d.hrs.filter(h => h[0] >= 6 && h[0] <= 20);
+  const maxG = Math.max(...hrs.map(h => h[7]), d.gust || 0), wetH = hrs.filter(h => (h[3] ?? 0) >= 50 || h[4] >= 0.5), snow = hrs.some(h => h[9] > 0 || [71,73,75,77,85,86].includes(h[5]));
+  const minAp = Math.min(...hrs.map(h => h[2])), calm = hrs.filter(h => h[7] < 45).map(h => h[0]);
+  const b = bestStart(d, i);
+  if(b) tips.push(`<b>Start um ${b.s} Uhr</b> empfohlen: ${stageHours(i)} Std. Gehzeit, Ankunft ca. ${b.end} Uhr. In diesem Fenster Böen bis ${b.maxG} km/h${b.wet ? `, ${b.wet} Std. mit Regenrisiko` : ", eher trocken"}.`);
+  if(i === 3) tips.push("Pass-Tag: Ranger erwarten den Start bis spätestens 7 Uhr. Am Pass selbst ist es meist deutlich windiger als im Tal.");
+  if(maxG >= 80) tips.push(`<b>Sturmböen bis ${maxG} km/h.</b> Ranger können Wege sperren. Offene Stellen und Grate früh am Tag passieren, Stöcke kurz fassen, bei Böen stehen bleiben und tief gehen.`);
+  else if(maxG >= 55){ const late = hrs.filter(h => h[0] >= 13 && h[7] >= 55).length, early = hrs.filter(h => h[0] < 13 && h[7] >= 55).length;
+    tips.push(`Kräftige Böen bis ${maxG} km/h${late > early ? ", vor allem nachmittags: früh los und die offenen Abschnitte vor Mittag schaffen" : ""}. Rucksackhülle festzurren, Mütze sichern.`); }
+  if(wetH.length){ const from = wetH[0][0], to = wetH[wetH.length-1][0]; tips.push(`Regen wahrscheinlich ${from === to ? "um " + from : "zwischen " + from + " und " + (to+1)} Uhr: Regenjacke und Regenhose griffbereit oben in den Rucksack, Handy und Schlafsack wasserdicht verpacken. Pausen lieber im Wald einlegen.`); }
+  if(snow) tips.push("Schnee möglich, vor allem in der Höhe: Handschuhe, Mütze und Gamaschen mitnehmen, auf Schneefeldern langsam gehen.");
+  if(minAp <= 0) tips.push(`Gefühlt bis ${minAp}° am höchsten Punkt: Daunenjacke und Handschuhe für Pausen bereit halten.`);
+  if(d.uv != null && d.uv >= 5) tips.push(`UV-Index ${d.uv}: Sonnencreme LSF 50, Sonnenbrille und Lippenschutz, auch wenn es kühl ist.`);
+  if(d.end && d.end.night != null && d.end.night <= 2) tips.push(`Nacht am Camp bis ${d.end.night}°: dicke Socken und Mütze für den Schlafsack.`);
+  if(calm.length && maxG >= 45){ const c0 = calm[0], c1 = calm[calm.length-1]; tips.push(`Ruhigste Stunden: ${c0}${c1 !== c0 ? "–" + (c1+1) : ""} Uhr (Böen unter 45 km/h).`); }
+  return tips;
+}
 function renderStageWx(){
   const box = $("#stageWx"); if(!box) return; const W = trekWx(); const i = stageSel;
   const d = W && W.st && W.st[i];
-  if(!d){ const days = Math.round((new Date(stageISO(i)) - new Date()) / 864e5); box.innerHTML = `<p class="small muted" style="margin:0 0 8px">Wetter für den ${esc(TREK[i].d)}: ${days > 15 ? `Prognose gibt es ab ca. ${days - 15} Tagen.` : "beim nächsten Laden mit Netz."}</p>`; return; }
-  const WI = {0:["☀️","Klar"],1:["🌤️","Überwiegend klar"],2:["⛅","Teils bewölkt"],3:["☁️","Bedeckt"],45:["🌫️","Nebel"],48:["🌫️","Nebel"],51:["🌦️","Niesel"],53:["🌦️","Niesel"],55:["🌧️","Niesel"],61:["🌧️","Leichter Regen"],63:["🌧️","Regen"],65:["🌧️","Starker Regen"],66:["🌧️","Gefrierender Regen"],67:["🌧️","Gefrierender Regen"],71:["🌨️","Leichter Schnee"],73:["🌨️","Schnee"],75:["❄️","Starker Schnee"],77:["🌨️","Schneegriesel"],80:["🌦️","Schauer"],81:["🌧️","Schauer"],82:["⛈️","Heftige Schauer"],85:["🌨️","Schneeschauer"],86:["❄️","Schneeschauer"],95:["⛈️","Gewitter"],96:["⛈️","Gewitter"],99:["⛈️","Gewitter"]};
+  if(!d){ const days = Math.round((new Date(stageISO(i)) - new Date()) / 864e5); box.innerHTML = `<p class="small muted" style="margin:0 0 8px">Wetter für den ${esc(TREK[i].d)}: ${days > 15 ? `Prognose gibt es ab ca. ${days - 15} Tagen.` : "beim nächsten Laden mit Netz (Offline-Paket unten)."}</p>`; return; }
   const w = WI[d.code] || ["🌡️", ""];
-  const gc = d.gust >= 80 ? "red" : d.gust >= 55 ? "warn" : "";
+  const gc = g => g >= 80 ? "red" : g >= 55 ? "warn" : "";
+  const age = Math.round((Date.now() - W.at) / 3600e3);
+  const hrs = d.hrs.filter(h => h[0] >= 5 && h[0] <= 21);
   box.innerHTML = `<div class="wxstage"><div class="sechead"><b>${w[0]} ${esc(w[1])} · ${d.hi}°/${d.lo}°</b><span class="small muted">Stand ${new Date(W.at).toLocaleString("de-DE",{day:"numeric",month:"numeric",hour:"2-digit",minute:"2-digit"})}</span></div>
-    <div class="chips"><span class="chip ${gc}">Böen bis ${d.gust} km/h</span><span class="chip">Wind ${d.wind} km/h</span><span class="chip">${d.rain} mm Niederschlag</span>${d.high ? `<span class="chip grey">am höchsten Punkt${d.ele ? ", " + d.ele + " m" : ""}</span>` : ""}</div>
-    ${d.hrs && d.hrs.length ? `<div class="small muted" style="margin-top:6px">Böen im Tagesverlauf: ${d.hrs.map(h => `${h[0]} Uhr ${h[1]}`).join(" · ")} km/h</div>` : ""}
-    ${d.gust >= 80 ? '<p class="small" style="margin:6px 0 0;color:var(--crit)"><b>Sturm möglich.</b> Ranger können Wege oder den Pass sperren. Früh starten, Plan B besprechen.</p>' : ""}
-    <p class="small muted" style="margin:4px 0 0">Mehr als 3–4 Tage voraus nur eine Tendenz. In Patagonien ändert sich das Wetter stündlich.</p></div>`;
+    <div class="chips"><span class="chip ${gc(d.gust)}">Böen bis ${d.gust} km/h</span><span class="chip">Wind ${d.wind} km/h</span><span class="chip">${d.rain} mm${d.pp != null ? ` · ${d.pp}%` : ""}</span>${d.uv != null ? `<span class="chip">UV ${d.uv}</span>` : ""}${d.rise ? `<span class="chip">☀ ${d.rise} – ${d.set}</span>` : ""}</div>
+    <p class="small muted" style="margin:6px 0 0">Ort: ${d.high ? `höchster Punkt der Etappe${d.ele ? ", " + d.ele + " m" : ""}` : "Mitte der Etappe"}${d.end ? ` · Camp abends ca. ${d.end.eve ?? d.end.hi}°, nachts ${d.end.night}°` : ""}.</p>
+    <ul class="wxtips">${wxAdvice(d, i).map(t => `<li>${t}</li>`).join("")}</ul>
+    <details class="wxhours"><summary>Stunde für Stunde</summary>
+      <div class="hourtable" role="table" aria-label="Wetter Stunde für Stunde">
+        <div class="hr head" role="row"><span>Uhr</span><span></span><span>°C</span><span>gefühlt</span><span>Regen</span><span>Böen</span></div>
+        ${hrs.map(h => `<div class="hr" role="row"><span>${h[0]}</span><span>${(WI[h[5]]||["",""])[0]}</span><span>${h[1]}°</span><span>${h[2]}°</span><span>${h[3] != null ? h[3] + "%" : "–"}${h[4] ? ` <small>${h[4]}mm</small>` : ""}</span><span class="${gc(h[7])}">${h[7]}</span></div>`).join("")}
+      </div></details>
+    <p class="small muted" style="margin:6px 0 0">${age > 24 ? `<b>Stand ist ${Math.round(age/24)} Tag(e) alt.</b> ` : ""}Vorhersage-Modell für genau diesen Punkt und Tag. Mehr als 3 bis 4 Tage voraus nur eine Tendenz, in Patagonien ändert sich das Wetter oft stündlich.</p></div>`;
 }
 /* GPS: Wo bin ich auf der Etappe? */
 function locateMe(){
@@ -550,7 +602,7 @@ async function offlineStatus(){
   return { trail: !!T, trailAt: T && T.at, nprof, wxAt: W && W.at };
 }
 async function renderOfflineCard(){
-  const box = $("#offlineCard"); if(!box) return; const s = await offlineStatus();
+  let box = $("#offlineCard"); if(!box) return; const s = await offlineStatus(); box = $("#offlineCard"); if(!box) return;
   const f = t => t ? new Date(t).toLocaleString("de-DE",{day:"numeric",month:"numeric",hour:"2-digit",minute:"2-digit"}) : "–";
   box.innerHTML = `<div class="sechead"><h3>Offline-Paket für den Trek</h3></div>
     <ul class="dots" style="margin:0 0 8px">
@@ -560,7 +612,7 @@ async function renderOfflineCard(){
     </ul>
     <button type="button" class="btn" id="offlineBtn">${s.trail ? "Aktualisieren" : "Jetzt laden"}</button> <span class="small muted" id="offlineMsg">${esc(offlineLast)}</span>
     <p class="small muted" style="margin:8px 0 0">Auf beiden Handys einmal laden. Wetter zuletzt am Abend des 17.11. in El Calafate aktualisieren. Die Karte darunter (Landschaft) gibt es offline nicht, Weg, Camps und euer Standort funktionieren aber.</p>`;
-  $("#offlineBtn").addEventListener("click", () => runOffline(true));
+  const ob = box.querySelector("#offlineBtn"); if(ob) ob.addEventListener("click", () => runOffline(true));
 }
 let offlineRunning = false, offlineLast = "";
 async function runOffline(manual){

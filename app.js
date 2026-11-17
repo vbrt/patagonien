@@ -137,9 +137,10 @@ function postHtml(p){
       ${S.editor ? `<button class="btn danger" type="button" data-del="${esc(p.id)}" style="margin-left:auto">Löschen</button>` : ""}</div>
     ${p.status ? `<div class="st">● ${esc(p.status)}</div>` : ""}
     ${p.body ? `<p class="txt">${esc(p.body)}</p>` : ""}
-    ${n ? `<div class="media ${cls}">${media.map((m,i) => m.type && m.type.startsWith("video/")
-        ? `<video src="${esc(mediaUrl(m.path))}" controls playsinline preload="none"></video>`
-        : `<button type="button" data-lb="${esc(mediaUrl(m.path))}" aria-label="Foto ${i+1} groß anzeigen"><img src="${esc(mediaUrl(m.thumb || m.path))}" alt="Foto von ${who.name}, ${esc(p.place)}" loading="lazy"></button>`).join("")}</div>` : ""}
+    ${n ? `<div class="media ${cls}">${media.map((m,i) => { const vid = m.type && m.type.startsWith("video/");
+        return vid && !m.thumb
+          ? `<button type="button" class="vid" data-gal="${esc(p.id)}" data-i="${i}" aria-label="Video ${i+1} abspielen"><video src="${esc(mediaUrl(m.path))}#t=0.5" preload="metadata" muted playsinline></video><span class="play" aria-hidden="true">▶</span></button>`
+          : `<button type="button" class="${vid ? "vid" : ""}" data-gal="${esc(p.id)}" data-i="${i}" aria-label="${vid ? "Video" : "Foto"} ${i+1} von ${n} groß anzeigen"><img src="${esc(mediaUrl(m.thumb || m.path))}" alt="${vid ? "Video" : "Foto"} von ${who.name}, ${esc(p.place)}" loading="lazy">${vid ? '<span class="play" aria-hidden="true">▶</span>' : ""}</button>`; }).join("")}</div>` : ""}
     <div class="react" role="group" aria-label="Reaktionen">${REACTIONS.map(e => { const mine = store.get("rx:"+p.id+":"+e); return `<button type="button" class="${mine ? "mine" : ""}" data-rx="${esc(p.id)}" data-emoji="${e}" aria-label="${e} Reaktion">${e} ${rx[e] ? rx[e] : ""}</button>`; }).join("")}
       ${S.editor ? `<button type="button" class="btn wa small" data-share="${esc(p.id)}" style="margin-left:auto">Per WhatsApp teilen</button>` : ""}</div>
     <div class="comments">
@@ -171,6 +172,7 @@ function studioHtml(){
       <label>Lebenszeichen<select id="pStatus">${STATUSES.map(s => `<option value="${esc(s)}">${s ? esc(s) : "(keins)"}</option>`).join("")}</select></label>
       <label>Text<textarea id="pText" maxlength="4000" placeholder="Was habt ihr heute erlebt?"></textarea></label>
       <label>Fotos oder Videos (bis zu 8)<input id="pMedia" type="file" accept="image/*,video/*" multiple></label>
+      <p class="small muted" style="margin:-4px 0 6px">Videos: am besten kurz (bis ca. 30 Sek., max. 50 MB) und im WLAN senden. Fotos werden automatisch verkleinert.</p>
       <label class="chk"><input type="checkbox" id="pSaver" ${saver ? "checked" : ""}> Sparmodus: kleinere Fotos, ideal bei schwachem Netz</label>
       <div class="previews" id="pPrev"></div>
       <div><button class="btn" type="submit" id="pSubmit">Veröffentlichen</button></div>
@@ -222,8 +224,19 @@ function scaleImage(file, max, q){
     img.src = url;
   });
 }
+function videoThumb(file){
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file), v = document.createElement("video");
+    let done = false; const fin = (b, err) => { if(done) return; done = true; URL.revokeObjectURL(url); b ? res(b) : rej(err || new Error("Video")); };
+    v.muted = true; v.playsInline = true; v.preload = "auto"; v.src = url;
+    v.addEventListener("loadedmetadata", () => { try{ v.currentTime = Math.min(0.8, (v.duration || 1) / 3); }catch(e){ fin(null, e); } });
+    v.addEventListener("seeked", () => { try{ const max = 640, r = Math.min(1, max / Math.max(v.videoWidth, v.videoHeight)); const c = document.createElement("canvas"); c.width = Math.round(v.videoWidth * r); c.height = Math.round(v.videoHeight * r); c.getContext("2d").drawImage(v, 0, 0, c.width, c.height); c.toBlob(b => fin(b), "image/jpeg", 0.7); }catch(e){ fin(null, e); } });
+    v.addEventListener("error", () => fin(null));
+    setTimeout(() => fin(null, new Error("Zeit")), 8000);
+  });
+}
 async function prepareFile(f, saver){
-  if(f.type.startsWith("video/")) return { name: f.name, type: f.type || "video/mp4", full: f, thumb: null };
+  if(f.type.startsWith("video/")) return { name: f.name, type: f.type || "video/mp4", full: f, thumb: await videoThumb(f).catch(() => null) };
   const full = await scaleImage(f, saver ? 1280 : 1800, saver ? 0.62 : 0.76);
   const thumb = await scaleImage(f, 640, 0.6);
   return { name: (f.name.replace(/\.[^.]+$/,"") || "foto") + ".jpg", type: "image/jpeg", full, thumb };
@@ -317,7 +330,7 @@ async function filesForPost(p){
 
 /* ---------- Aktionen ---------- */
 function bind(){
-  document.querySelectorAll("[data-lb]").forEach(b => b.addEventListener("click", () => { $("lbImg").src = b.dataset.lb; $("lb").classList.add("on"); $("lbClose").focus(); }));
+  document.querySelectorAll("[data-gal]").forEach(b => b.addEventListener("click", () => openGallery(b.dataset.gal, +b.dataset.i)));
   document.querySelectorAll("[data-rx]").forEach(b => b.addEventListener("click", async () => {
     const id = b.dataset.rx, e = b.dataset.emoji, k = "rx:"+id+":"+e;
     if(store.get(k)) return;
@@ -396,8 +409,27 @@ function bind(){
   });
 }
 function alertMsg(el, t){ let m = el.querySelector(".msg"); if(!m){ m = document.createElement("div"); m.className = "msg"; el.after(m); } m.textContent = t; }
-$("lb").addEventListener("click", e => { if(e.target.id === "lb" || e.target.id === "lbClose") $("lb").classList.remove("on"); });
-document.addEventListener("keydown", e => { if(e.key === "Escape") $("lb").classList.remove("on"); });
+/* Galerie: alle Fotos & Videos eines Posts durchblättern */
+const GAL = { items: [], i: 0 };
+function galItems(postId){ const p = S.posts.find(x => String(x.id) === String(postId)); return p ? (p.media || []).map(m => ({ url: mediaUrl(m.path), poster: m.thumb ? mediaUrl(m.thumb) : "", video: !!(m.type && m.type.startsWith("video/")) })) : []; }
+function showGal(){
+  const it = GAL.items[GAL.i]; if(!it) return; const stage = $("lbStage");
+  stage.querySelectorAll("video").forEach(v => { try{ v.pause(); }catch(e){} });
+  stage.innerHTML = it.video ? `<video src="${esc(it.url)}" ${it.poster ? `poster="${esc(it.poster)}"` : ""} controls playsinline autoplay></video>` : `<img src="${esc(it.url)}" alt="Foto ${GAL.i+1} von ${GAL.items.length}">`;
+  const many = GAL.items.length > 1;
+  $("lbPrev").hidden = !many; $("lbNext").hidden = !many;
+  $("lbCount").textContent = many ? `${GAL.i+1} / ${GAL.items.length}` : "";
+  if(many){ const nx = GAL.items[(GAL.i+1) % GAL.items.length]; if(nx && !nx.video){ const pre = new Image(); pre.src = nx.url; } }
+}
+function openGallery(postId, i){ GAL.items = galItems(postId); if(!GAL.items.length) return; GAL.i = i || 0; $("lb").classList.add("on"); document.body.style.overflow = "hidden"; showGal(); $("lbClose").focus(); }
+function closeGallery(){ const st = $("lbStage"); if(st) st.querySelectorAll("video").forEach(v => { try{ v.pause(); }catch(e){} }); if(st) st.innerHTML = ""; $("lb").classList.remove("on"); document.body.style.overflow = ""; }
+function stepGal(d){ if(GAL.items.length < 2) return; GAL.i = (GAL.i + d + GAL.items.length) % GAL.items.length; showGal(); }
+$("lb").addEventListener("click", e => { const id = e.target.id; if(id === "lb" || id === "lbClose" || id === "lbStage") closeGallery(); else if(id === "lbPrev") stepGal(-1); else if(id === "lbNext") stepGal(1); });
+document.addEventListener("keydown", e => { if(!$("lb").classList.contains("on")) return; if(e.key === "Escape") closeGallery(); else if(e.key === "ArrowRight") stepGal(1); else if(e.key === "ArrowLeft") stepGal(-1); });
+(() => { let x0 = null, y0 = 0; const el = $("lb");
+  el.addEventListener("touchstart", e => { if(e.touches.length === 1){ x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; } }, { passive: true });
+  el.addEventListener("touchend", e => { if(x0 == null) return; const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0; x0 = null;
+    if(Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.3) stepGal(dx < 0 ? 1 : -1); else if(dy > 90 && Math.abs(dy) > Math.abs(dx) * 1.5) closeGallery(); }, { passive: true }); })();
 
 /* ---------- Demo ---------- */
 function demoData(){
